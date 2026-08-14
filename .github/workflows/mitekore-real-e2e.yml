@@ -32,7 +32,7 @@ jobs:
           const p='mitekore-e2e-test.js';
           let s=fs.readFileSync(p,'utf8');
           const from="await phone.screenshot({path:'02-phone-paired.png',fullPage:false});await sleep(1500);await dismiss(phone);";
-          const to=from+"\n  try{const close=pc.locator('#devicePairCloseBtn');if(await close.count()&&await close.isVisible())await close.click();}catch(e){}\n  await sleep(300);";
+          const to=from+"\n  try{const close=pc.locator('#devicePairCloseBtn');if(await close.count()&&await close.isVisible())await close.click();}catch(e){}\n  await sleep(1500);await dismiss(pc);await sleep(500);await dismiss(pc);";
           if(!s.includes(from)) throw new Error('pair screenshot anchor not found');
           fs.writeFileSync(p,s.replace(from,to));
           NODE
