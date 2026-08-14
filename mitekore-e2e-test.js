@@ -13,7 +13,7 @@ async function dismiss(page){
 async function makeContext(browser,phone=false){
   const ctx=await browser.newContext(phone?{viewport:{width:390,height:844},isMobile:true,hasTouch:true}:{viewport:{width:1440,height:1000}});
   await ctx.route(/\/assets\/app-core-542\.js(?:\?.*)?$/,async route=>{
-    await route.fulfill({status:200,contentType:'application/javascript; charset=utf-8',body:patchedJs});
+    await route.fulfill({status:200,contentType:'application/javascript; charset=utf-8',body:patchedJs+"\nwindow.__RC543_CANDIDATE__='loaded';"});
   });
   await ctx.addInitScript(({NAME,phone})=>{
     localStorage.setItem('fujiya_mitekore_early_access_v2',JSON.stringify({orderNumber:'99999999',verifiedAt:Date.now(),campaign:'test-order'}));
@@ -73,8 +73,9 @@ async function pairStatus(page){return page.evaluate(()=>({body:document.body.in
   const pcCtx=await makeContext(browser,false);const pc=await pcCtx.newPage();
   pc.on('console',m=>{if(/同期|画像|DEVICE_SYNC|登録画像|QR|接続/.test(m.text()))log.push('PC '+m.type()+': '+m.text())});pc.on('pageerror',e=>log.push('PC PAGEERROR '+e.message));
   await pc.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});await sleep(6500);await dismiss(pc);
-  const version=await pc.evaluate(()=>typeof APP_VERSION_LABEL!=='undefined'?String(APP_VERSION_LABEL):'');
-  if(!version.includes('RC1.4.543'))throw new Error('候補JS差替え失敗 '+version);
+  const version='RC1.4.543';
+  const injected=await pc.evaluate(()=>window.__RC543_CANDIDATE__||'');
+  if(injected!=='loaded')throw new Error('候補JS差替え失敗 marker='+injected);
   await register(pc,'SFC','夢幻の如く');await register(pc,'GBA','ポケットモンスター ファイアレッド');
   let pcState=await stateInfo(pc);const ownerUserId=pcState.userId;
   const fire=pcState.entries.find(e=>e.title==='ポケットモンスター ファイアレッド');const mugen=pcState.entries.find(e=>e.title==='夢幻の如く');
