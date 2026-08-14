@@ -1,0 +1,31 @@
+--- app-core-543-candidate.js
++++ app-core-543-candidate.js
+@@ -32678,18 +32678,21 @@
+   }
+ 
+   async function refreshEntryPhotos(){
+     try{
+       const rows=typeof entryPhotoGetAllRecords==='function'?await entryPhotoGetAllRecords():[];
+-      const map=new Map((Array.isArray(rows)?rows:[]).map(row=>[String(row?.id||''),String(row?.data||'')]).filter(([id,data])=>id&&data));
+-      (state.entries||[]).forEach(entry=>{const id=String(entry?.id||'');const data=String(entry?.photoData||'');if(id&&data)map.set(id,data);});
++      // RC1.4.543: 明示削除済みIDは、削除前に開始していた古いIndexedDB読込結果で復活させない。
++      // 正常な画像追加・受信では set 側が先に clearEntryPhotoDeleted() するため、ここで削除印を
++      // 自動解除する必要はない。削除印が残っている間は stale な画像を同期候補から除外する。
++      const deleted=entryPhotoDeleteMap();
++      const isDeleted=id=>Object.prototype.hasOwnProperty.call(deleted,String(id||''));
++      const map=new Map((Array.isArray(rows)?rows:[])
++        .map(row=>[String(row?.id||''),String(row?.data||'')])
++        .filter(([id,data])=>id&&data&&!isDeleted(id)));
++      (state.entries||[]).forEach(entry=>{
++        const id=String(entry?.id||''),data=String(entry?.photoData||'');
++        if(id&&data&&!isDeleted(id))map.set(id,data);
++      });
+       entryPhotoMap=map;
+-      if(map.size){
+-        const deleted=entryPhotoDeleteMap();let changed=false;
+-        map.forEach((_data,id)=>{if(Object.prototype.hasOwnProperty.call(deleted,id)){delete deleted[id];changed=true;}});
+-        if(changed)writeEntryPhotoDeleteMap(deleted);
+-      }
+       entryPhotosReady=true;
+     }catch(error){console.warn('登録画像同期キャッシュ準備失敗',error);}
+   }
