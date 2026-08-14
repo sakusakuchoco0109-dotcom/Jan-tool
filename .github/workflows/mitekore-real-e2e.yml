@@ -17,7 +17,7 @@ jobs:
           npm init -y
           npm i playwright@1.48.2
           npx playwright install chromium --with-deps
-      - name: Run real browser test
+      - name: Run production diagnostic
         run: |
           cat > test.js <<'EOF'
           const { chromium } = require('playwright');
@@ -28,64 +28,73 @@ jobs:
             const APP='https://hilarious-haupia-6e0406.netlify.app/';
             const browser=await chromium.launch({headless:true});
             const ctx=await browser.newContext({viewport:{width:1440,height:1000}});
-            await ctx.addInitScript(({NAME,USER})=>{
+            const net=[];
+            const consoleLogs=[];
+            const page=await ctx.newPage();
+            page.on('console',m=>consoleLogs.push(`${m.type()}: ${m.text()}`));
+            page.on('pageerror',e=>consoleLogs.push('PAGEERROR: '+e.message));
+            page.on('request',req=>{
+              const u=req.url();
+              if(/script\.google\.com|script\.googleusercontent\.com|googleapis\.com/i.test(u)){
+                net.push({kind:'request',method:req.method(),url:u,postData:req.postData()||''});
+              }
+            });
+            page.on('response',async res=>{
+              const u=res.url();
+              if(/script\.google\.com|script\.googleusercontent\.com|googleapis\.com/i.test(u)){
+                let text=''; try{text=(await res.text()).slice(0,5000)}catch(e){text='[unreadable:'+e.message+']'}
+                net.push({kind:'response',status:res.status(),url:u,text});
+              }
+            });
+            await page.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});
+            await page.waitForTimeout(7000);
+            const discovered=await page.evaluate(async({NAME,USER})=>{
+              const ls={}; for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i); ls[k]=localStorage.getItem(k)}
               localStorage.setItem('fujiya_collection_user_id',USER);
               localStorage.setItem('fujiya_collection_user_name',NAME);
               localStorage.setItem('fujiya_collection_share_opt_in_v1','1');
               localStorage.setItem('fujiya_collection_share_purchase_price_opt_in_v1','1');
-              localStorage.setItem('fujiya_collection_setup_done_v1','1');
-              localStorage.setItem('fujiya_collection_tutorial_seen_v2_rc1474','1');
-              localStorage.setItem('fujiya_collection_first_run_seen_v20_2_35cn','1');
-              localStorage.setItem('fujiya_mitekore_early_access_v2',JSON.stringify({orderNumber:'99999999',verifiedAt:Date.now(),campaign:'test-order'}));
-              localStorage.setItem('fujiya_collection_profile_v20_1',JSON.stringify({name:NAME,bio:'ChatGPT実ブラウザ同期検証',favoritePlatforms:['GBA'],favoriteGames:['ポケットモンスター ファイアレッド'],links:{},visibility:{}}));
+              localStorage.setItem('fujiya_collection_profile_v20_1',JSON.stringify({name:NAME,bio:'ChatGPT本番同期検証',favoritePlatforms:['GBA'],favoriteGames:['ポケットモンスター ファイアレッド'],links:{},visibility:{}}));
               localStorage.setItem('fujiya_collection_profile_v20_1_updated_at',new Date().toISOString());
+              const fn={};
+              for(const n of ['fujiyaMiteRecoSyncProfile','getGasEndpoint','submitGasPostFormNoWait','deviceSyncPush','deviceSyncPull']){
+                try{fn[n]=typeof window[n]==='function'?window[n].toString().slice(0,12000):String(typeof window[n])}catch(e){fn[n]='ERR '+e.message}
+              }
+              const scripts=[...document.scripts].map(s=>s.src).filter(Boolean);
+              const hits=[];
+              for(const src of scripts){
+                try{
+                  const txt=await (await fetch(src,{cache:'no-store'})).text();
+                  for(const needle of ['fujiyaMiteRecoSyncProfile','script.google.com/macros/s/','mite_reco_profile','profile_sync','users']){
+                    const i=txt.indexOf(needle);
+                    if(i>=0) hits.push({src,needle,snippet:txt.slice(Math.max(0,i-2500),Math.min(txt.length,i+7000))});
+                  }
+                }catch(e){hits.push({src,error:String(e)})}
+              }
+              return {href:location.href,title:document.title,version:document.body.innerText.match(/RC1\.4\.\d+/)?.[0]||'',scripts,fn,hits,localStorageBefore:ls};
             },{NAME,USER});
-            const page=await ctx.newPage();
-            const logs=[];
-            page.on('console',m=>logs.push('CONSOLE '+m.type()+': '+m.text()));
-            page.on('pageerror',e=>logs.push('PAGEERROR '+e.message));
-            await page.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});
-            await page.waitForTimeout(5000);
-            try{await page.waitForFunction(()=>window.__FUJIYA_EARLY_ACCESS_UNLOCKED__===true,{timeout:30000});}catch(e){logs.push('unlock wait failed '+e.message)}
-            for(const sel of ['[data-profile-unlock-close]','#rareBurstCloseBtn','.mike-talk-close','#tutorialCloseBtn']){
-              try{const el=page.locator(sel).first(); if(await el.count()&&await el.isVisible()) await el.click({timeout:1000});}catch(e){}
-            }
-            const reg=page.locator('[data-ui-tab="register"]:visible').first();
-            await reg.click({timeout:10000});
-            await page.waitForTimeout(800);
-            const quick=page.locator('#quickRegisterModeBtn');
-            if(await quick.count() && await quick.isVisible()) { await quick.click(); await page.waitForTimeout(300); }
-            await page.locator('#platform').fill('GBA');
-            await page.locator('#title').fill('ポケットモンスター ファイアレッド');
-            await page.locator('#title').dispatchEvent('input');
-            await page.waitForTimeout(1200);
-            await page.locator('#saveBtn').click({timeout:10000});
-            await page.waitForTimeout(4000);
-            const profileResult=await page.evaluate(async()=>{
-              if(typeof window.fujiyaMiteRecoSyncProfile!=='function') return {available:false};
-              try{return {available:true,ok:await window.fujiyaMiteRecoSyncProfile({force:true})};}
-              catch(e){return {available:true,ok:false,error:String(e&&e.message||e)};}
-            });
-            logs.push('PROFILE_SYNC '+JSON.stringify(profileResult));
+            await page.reload({waitUntil:'domcontentloaded',timeout:60000});
             await page.waitForTimeout(6000);
-            for(const sel of ['[data-profile-unlock-close]','#rareBurstCloseBtn','.mike-talk-close','#tutorialCloseBtn']){
-              try{const el=page.locator(sel).first(); if(await el.count()&&await el.isVisible()) await el.click({timeout:1000});}catch(e){}
-            }
-            const list=page.locator('[data-ui-tab="list"]:visible').first();
-            if(await list.count()) { await list.click(); await page.waitForTimeout(1200); }
-            await page.screenshot({path:'mitekore-real-pc.png',fullPage:false});
-            const state=await page.evaluate(()=>({
-              version:document.body.innerText.match(/RC1\.4\.\d+/)?.[0]||'',
-              userId:localStorage.getItem('fujiya_collection_user_id'),
-              name:localStorage.getItem('fujiya_collection_user_name'),
-              entries:(()=>{try{return JSON.parse(localStorage.getItem('fujiya_collection_v1')||'{}').entries||[]}catch(e){return []}})().map(x=>({id:x.id,title:x.title,platform:x.platform,updatedAt:x.updatedAt})),
-              bodyText:document.body.innerText.slice(0,12000)
-            }));
-            fs.writeFileSync('result.json',JSON.stringify({profileResult,state,logs},null,2));
-            console.log(JSON.stringify({profileResult,entryCount:state.entries.length,userId:state.userId,name:state.name,version:state.version,entries:state.entries.slice(0,5)},null,2));
+            let profileResult;
+            try{
+              profileResult=await page.evaluate(async()=>{
+                if(typeof window.fujiyaMiteRecoSyncProfile!=='function') return {available:false};
+                try{return {available:true,value:await window.fujiyaMiteRecoSyncProfile({force:true})};}
+                catch(e){return {available:true,error:String(e&&e.stack||e)}};
+              });
+            }catch(e){profileResult={evalError:String(e)}}
+            await page.waitForTimeout(8000);
+            await page.screenshot({path:'mitekore-prod-diagnostic.png',fullPage:false});
+            const after=await page.evaluate(()=>{
+              const out={}; for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i); if(/user|profile|share|sync/i.test(k)) out[k]=localStorage.getItem(k)} return out;
+            });
+            const result={discovered,profileResult,network:net,console:consoleLogs,localStorageAfter:after};
+            fs.writeFileSync('result.json',JSON.stringify(result,null,2));
+            console.log('PROFILE_RESULT',JSON.stringify(profileResult));
+            console.log('NETWORK',JSON.stringify(net,null,2));
+            console.log('FUNCTIONS',JSON.stringify(discovered.fn,null,2));
+            console.log('HITS',JSON.stringify(discovered.hits,null,2));
             await browser.close();
-            if(!profileResult.available || !profileResult.ok) process.exitCode=2;
-            if(!state.entries.some(e=>e.title.includes('ポケットモンスター ファイアレッド'))) process.exitCode=3;
           })().catch(e=>{console.error(e);process.exit(1)});
           EOF
           node test.js
@@ -93,7 +102,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mitekore-real-e2e-evidence
+          name: mitekore-prod-diagnostic
           path: |
-            mitekore-real-pc.png
+            mitekore-prod-diagnostic.png
             result.json
