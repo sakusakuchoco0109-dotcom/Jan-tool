@@ -25,6 +25,17 @@ jobs:
           patch app-core-543-candidate.js < mitekore-rc543-candidate.patch
           node --check app-core-543-candidate.js
           grep -q 'RC1.4.543' app-core-543-candidate.js
+      - name: Close pairing modal in test flow
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const p='mitekore-e2e-test.js';
+          let s=fs.readFileSync(p,'utf8');
+          const from="await phone.screenshot({path:'02-phone-paired.png',fullPage:false});await sleep(1500);await dismiss(phone);";
+          const to=from+"\n  try{const close=pc.locator('#devicePairCloseBtn');if(await close.count()&&await close.isVisible())await close.click();}catch(e){}\n  await sleep(300);";
+          if(!s.includes(from)) throw new Error('pair screenshot anchor not found');
+          fs.writeFileSync(p,s.replace(from,to));
+          NODE
       - name: Run candidate against real GAS
         run: node mitekore-e2e-test.js
       - name: Upload evidence
