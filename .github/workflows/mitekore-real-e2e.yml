@@ -25,17 +25,31 @@ jobs:
           patch app-core-543-candidate.js < mitekore-rc543-candidate.patch
           node --check app-core-543-candidate.js
           grep -q 'RC1.4.543' app-core-543-candidate.js
-      - name: Close pairing and unlock notices in test flow
+      - name: Make real UI clicks resilient to unlock notice
         run: |
           node <<'NODE'
           const fs=require('fs');
           const p='mitekore-e2e-test.js';
           let s=fs.readFileSync(p,'utf8');
-          const from="await phone.screenshot({path:'02-phone-paired.png',fullPage:false});await sleep(1500);await dismiss(phone);";
-          const to=from+"\n  try{const close=pc.locator('#devicePairCloseBtn');if(await close.count()&&await close.isVisible())await close.click();}catch(e){}\n  for(let i=0;i<100;i++){try{const u=pc.locator('[data-profile-unlock-close]:visible').first();if(await u.count()){await u.click({force:true,timeout:1000});}}catch(e){}await sleep(250);}\n  await dismiss(pc);";
-          if(!s.includes(from)) throw new Error('pair screenshot anchor not found');
-          fs.writeFileSync(p,s.replace(from,to));
+          const sleepAnchor="const sleep=ms=>new Promise(r=>setTimeout(r,ms));";
+          const helper=`\nasync function clickWithUnlock(page,locator,label){\n  let last=null;\n  for(let i=0;i<24;i++){\n    try{await locator.click({timeout:1400});return;}catch(e){last=e;}\n    try{\n      const overlay=page.locator('#profileV201UnlockOverlay.show');\n      if(await overlay.count()){\n        const close=overlay.locator('[data-profile-unlock-close]').first();\n        if(await close.count()){\n          await close.click({force:true,timeout:1000});\n          log.push('REAL_UI closed unlock notice before '+label);\n          await sleep(350);\n          continue;\n        }\n      }\n    }catch(e){}\n    await sleep(250);\n  }\n  throw last||new Error('click failed '+label);\n}\n`;
+          if(!s.includes(sleepAnchor)) throw new Error('sleep anchor not found');
+          s=s.replace(sleepAnchor,sleepAnchor+helper);
+          const pairFrom="await phone.screenshot({path:'02-phone-paired.png',fullPage:false});await sleep(1500);await dismiss(phone);";
+          const pairTo=pairFrom+"\n  try{const close=pc.locator('#devicePairCloseBtn');if(await close.count()&&await close.isVisible())await close.click();}catch(e){}\n  await sleep(500);";
+          if(!s.includes(pairFrom)) throw new Error('pair anchor not found');
+          s=s.replace(pairFrom,pairTo);
+          const listFrom="await pc.locator('[data-ui-tab=\"list\"]:visible').first().click();";
+          const listTo="await clickWithUnlock(pc,pc.locator('[data-ui-tab=\"list\"]:visible').first(),'一覧タブ');";
+          if(!s.includes(listFrom)) throw new Error('list click anchor not found');
+          s=s.replaceAll(listFrom,listTo);
+          const editFrom='await pc.locator(`button[data-action="edit"][data-id="${fire.id}"]`).first().click();';
+          const editTo='await clickWithUnlock(pc,pc.locator(`button[data-action="edit"][data-id="${fire.id}"]`).first(),\'FireRed編集\');';
+          if(!s.includes(editFrom)) throw new Error('edit click anchor not found');
+          s=s.replace(editFrom,editTo);
+          fs.writeFileSync(p,s);
           NODE
+          node --check mitekore-e2e-test.js
       - name: Run candidate against real GAS
         run: node mitekore-e2e-test.js
       - name: Upload evidence
