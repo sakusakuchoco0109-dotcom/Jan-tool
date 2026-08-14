@@ -1,0 +1,122 @@
+--- app-core-542.js
++++ app-core-543.js
+@@ -3,7 +3,7 @@
+ 'use strict';
+ 
+ const APP_VERSION = '20.2.35eq';
+-const APP_VERSION_LABEL = 'V20.2.35ex RC1.4.542';
++const APP_VERSION_LABEL = 'V20.2.35ex RC1.4.543';
+ const RUNTIME_ERRORS = [];
+ window.addEventListener('error', ev => {
+   const message = String(ev?.message || 'Unknown error');
+@@ -22181,7 +22181,7 @@
+       state.entries.unshift(entry);
+     }
+ 
+-    // RC1.4.542: 登録画像を保存した編集は、localStorage保存→自動同期より先に
++    // RC1.4.543: 登録画像を保存した編集は、localStorage保存→自動同期より先に
+     // IndexedDB画像キャッシュを確定させる。これで「ソフト更新だけ届いて画像が落ちる」競合を防ぐ。
+     const photoSyncChanged = state.removePhoto || String(entry.photoData||'') !== String(old?.photoData||'');
+     if(photoSyncChanged && typeof window.deviceSyncPrepareAllUserData==='function'){
+@@ -23759,6 +23759,11 @@
+ 
+ function devicePairTokenFromUrl(){
+   const hash = String(location.hash || '');
++  // RC1.4.543: v6の短縮QR(#p6=...)も接続URLとして認識する。
++  // 542ではQR生成側が#p6を使う一方、受信開始判定が#pairしか見ておらず、
++  // 読み取り後にacceptDevicePairFromUrl()へ到達しない不整合があった。
++  const compactMatch = hash.match(/^#p6=(.+)$/);
++  if(compactMatch) return `p6:${compactMatch[1]}`;
+   const hashMatch = hash.match(/^#pair=([A-Za-z0-9_-]+)$/);
+   if(hashMatch) return hashMatch[1];
+   try{
+@@ -25180,7 +25185,7 @@
+       const data=local?.data||remote?.data||{};
+       const isGameRecord=!String(id||'').startsWith('__')&&data&&typeof data==='object'&&('title' in data||'platform' in data);
+       if(isGameRecord){
+-        // RC1.4.542: ゲーム内容が同じなのにupdatedAtだけ違う場合は放置しない。
++        // RC1.4.543: ゲーム内容が同じなのにupdatedAtだけ違う場合は放置しない。
+         // 旧データ読込時に欠落時刻を「現在時刻」にしていた版があり、触っていないタイトルが
+         // スマホだけ先頭へ浮上する原因になった。実操作マーカーが無ければクラウド時刻へ収束させる。
+         const explicit=deviceSyncExplicitEditMap();
+@@ -32615,16 +32620,48 @@
+     const rows=entryPhotoDeleteMap();
+     if(Object.prototype.hasOwnProperty.call(rows,id)){delete rows[id];writeEntryPhotoDeleteMap(rows);}
+   }
++  function entryPhotoUpdatedMap(){
++    const meta=readMeta();
++    const rows=meta.entryPhotoUpdated&&typeof meta.entryPhotoUpdated==='object'?meta.entryPhotoUpdated:{};
++    return {...rows};
++  }
++  function writeEntryPhotoUpdatedMap(rows){
++    const meta=readMeta();
++    meta.entryPhotoUpdated=rows&&typeof rows==='object'?rows:{};
++    writeMeta(meta);
++  }
++  function setEntryPhotoUpdatedAt(itemId,at=''){
++    const id=String(itemId||'').trim();if(!id)return '';
++    const next=String(at||now());
++    const rows=entryPhotoUpdatedMap();
++    const old=String(rows[id]||'');
++    const oldMs=Date.parse(old)||0,nextMs=Date.parse(next)||0;
++    if(!old||nextMs>=oldMs){rows[id]=next;writeEntryPhotoUpdatedMap(rows);return next;}
++    return old;
++  }
++  function entryPhotoUpdatedAt(itemId){
++    return String(entryPhotoUpdatedMap()[String(itemId||'').trim()]||'');
++  }
+   window.deviceSyncMarkEntryPhotoDeleted=(id,at='')=>markEntryPhotoDeleted(id,at);
+   window.deviceSyncMarkEntryPhotoActive=id=>clearEntryPhotoDeleted(id);
+-  // RC1.4.542: 画像保存直後の実データを同期キャッシュへ即反映する。
++  // RC1.4.543: 画像保存直後の実データを同期キャッシュへ即反映する。
+   // DB再走査待ちの短い隙間に古い画像状態で同期が走らないようにする。
+   window.deviceSyncEntryPhotoCommitted=(id,data,at='',removed=false)=>{
+     const itemId=String(id||'').trim();if(!itemId)return;
+     const text=String(data||'');
+-    if(entryPhotosReady){
+-      if(text){entryPhotoMap.set(itemId,text);clearEntryPhotoDeleted(itemId);}
+-      else if(removed){entryPhotoMap.delete(itemId);markEntryPhotoDeleted(itemId,String(at||now()));}
++    const committedAt=String(at||now());
++    // RC1.4.543: 同じ画像を入れ直した場合でも「新しい編集」として時刻を進める。
++    // 旧chunkの内容hashだけで時刻を固定すると、後から作られたクラウド削除(tombstone)に永久に負ける。
++    if(text){
++      entryPhotoMap.set(itemId,text);
++      entryPhotosReady=true;
++      clearEntryPhotoDeleted(itemId);
++      setEntryPhotoUpdatedAt(itemId,committedAt);
++    }else if(removed){
++      entryPhotoMap.delete(itemId);
++      entryPhotosReady=true;
++      markEntryPhotoDeleted(itemId,committedAt);
++      setEntryPhotoUpdatedAt(itemId,committedAt);
+     }
+     scheduleBinaryRefresh('photo');
+     scheduleSync('登録画像変更',900);
+@@ -32981,7 +33018,11 @@
+       records.push({id:indexId,updatedAt:stableAt(kind+':index',JSON.stringify(indexData)),deletedAt:'',deviceId,data:indexData});
+     }
+     ids.forEach(itemId=>{
+-      const text=String(map.get(itemId)||'');const updatedAt=stableAt(kind+':'+itemId,text);const parts=splitText(text);const token=encKey(itemId);
++      const text=String(map.get(itemId)||'');
++      const stable=stableAt(kind+':'+itemId,text);
++      const explicitAt=kind==='entry_photo'?entryPhotoUpdatedAt(itemId):'';
++      const updatedAt=(Date.parse(explicitAt)||0)>(Date.parse(stable)||0)?explicitAt:stable;
++      const parts=splitText(text);const token=encKey(itemId);
+       parts.forEach((chunk,index)=>{const id=`${prefix}${token}:${index}`;clearDeletion(id);records.push({id,updatedAt,deletedAt:'',deviceId,data:{kind:kind+'_chunk_v1',itemId,part:index,total:parts.length,text:chunk}});});
+       if(kind==='entry_photo')records.push({id:`${ENTRY_PHOTO_STATE_PREFIX}${token}`,updatedAt,deletedAt:'',deviceId,data:{kind:'entry_photo_state_v2',itemId,state:'set'}});
+     });
+@@ -33100,6 +33141,8 @@
+       if(data){
+         finalMap.set(id,data);
+         clearEntryPhotoDeleted(id);
++        const receivedMs=Math.max(chunkTime,stateValue==='set'?stateTime:0);
++        if(receivedMs>0)setEntryPhotoUpdatedAt(id,new Date(receivedMs).toISOString());
+       }
+     });
+     const validEntryIds=new Set((state.entries||[]).map(entry=>String(entry?.id||'')).filter(Boolean));
+@@ -33262,4 +33305,4 @@
+ // RC1.4.539: 手動同期のstale revision競合を自動再取得・再統合。『今すぐ同期』を1操作で完了する方式へ。
+ // RC1.4.540: 登録画像の同期競合を修正。IndexedDB画像準備前の自動同期を待機し、古い『画像なし』indexで写真を消さない。
+ // RC1.4.541: 登録画像を論理単位で同期。空manifestを変更扱いしない・chunk単体でも復元・540以前の誤削除tombstoneを無効化・画像削除は明示stateだけで反映。
+-// RC1.4.542: 欠落updatedAtを現在時刻にしない。時刻だけの偽差分をクラウドへ収束。画像保存時はIndexedDB同期キャッシュ確定後に送信。
++// RC1.4.543: 欠落updatedAtを現在時刻にしない。時刻だけの偽差分をクラウドへ収束。画像保存時はIndexedDB同期キャッシュ確定後に送信。
