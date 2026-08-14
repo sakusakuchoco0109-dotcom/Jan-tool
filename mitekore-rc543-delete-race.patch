@@ -48,7 +48,8 @@
        entryPhotosReady=true;
      }catch(error){console.warn('登録画像同期キャッシュ準備失敗',error);}
    }
-@@ -33146,6 +33165,8 @@
+@@ -33160,31 +33160,37 @@
+     // manifestは案内用。完全に復元できたchunkはmanifestに無くても受け取る。
      // RC1.4.540で「空index + 写真chunk」になった既存クラウドもここで自動修復できる。
      const currentRows=typeof entryPhotoGetAllRecords==='function'?await entryPhotoGetAllRecords():[];
      const finalMap=new Map((Array.isArray(currentRows)?currentRows:[]).map(row=>[String(row?.id||''),String(row?.data||'')]).filter(([id,data])=>id&&data));
@@ -57,7 +58,7 @@
      const candidateIds=new Set([...manifestIds,...incoming.keys(),...states.keys(),...legacyDeleted]);
      candidateIds.forEach(id=>{
        const data=String(incoming.get(id)||'');
-@@ -33153,13 +33174,18 @@
+       const stateRow=states.get(id)||null;
        const stateValue=String(stateRow?.data?.state||'');
        const stateTime=pairRecordTime(stateRow);
        const chunkTime=incomingTimes.get(id)||0;
@@ -76,13 +77,15 @@
        if(data){
          finalMap.set(id,data);
          clearEntryPhotoDeleted(id);
+         const receivedMs=Math.max(chunkTime,stateValue==='set'?stateTime:0);
+         if(receivedMs>0)setEntryPhotoUpdatedAt(id,new Date(receivedMs).toISOString());
        }
-@@ -33172,7 +33198,7 @@
+     });
+     const validEntryIds=new Set((state.entries||[]).map(entry=>String(entry?.id||'')).filter(Boolean));
+     [...finalMap.keys()].forEach(id=>{if(!validEntryIds.has(id)&&legacyDeleted.has(id))finalMap.delete(id);});
      const records=[...finalMap.entries()].map(([id,data])=>({id,data}));
      if(typeof extendedIdbReplaceAll==='function')await extendedIdbReplaceAll('fujiya_collection_entry_photos_v1','photos',records);
      entryPhotoMap=finalMap;entryPhotosReady=true;
 -    const deletedIds=new Set([...legacyDeleted,...[...states.entries()].filter(([_id,row])=>String(row?.data?.state||'')==='deleted').map(([id])=>id)]);
 +    const deletedIds=new Set([...legacyDeleted,...preservedLocalDeletes,...[...states.entries()].filter(([_id,row])=>String(row?.data?.state||'')==='deleted').map(([id])=>id)]);
      (state.entries||[]).forEach(entry=>{
-       const id=String(entry?.id||'');
-       if(entryPhotoMap.has(id))entry.photoData=entryPhotoMap.get(id)||'';
