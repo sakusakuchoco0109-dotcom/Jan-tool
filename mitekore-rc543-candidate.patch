@@ -50,7 +50,50 @@
      deviceAutoSyncSchedule(reason,5000,false);
      return false;
    }
-@@ -32159,7 +32166,17 @@
+@@ -25529,7 +25536,9 @@
+ 
+   try{
+     const key = deviceSyncNormalizeKey(deviceSyncGetKey());
+-    for(let attempt=0;attempt<2;attempt++){
++    // RC1.4.543: PCとスマホが同時に自動同期した直後はrevisionが競合しやすい。
++    // 2回で諦めて2分待ちにせず、最新revisionを取り直して短い間隔で収束させる。
++    for(let attempt=0;attempt<5;attempt++){
+       const remote = await deviceSyncPull(key);
+       const localRecords = deviceSyncCaptureLocalRecords();
+       const plan = deviceSyncBuildPlan(localRecords,remote.records,remote.revision);
+@@ -25563,7 +25572,11 @@
+           const result = await deviceSyncPush(key,remote.revision,merged);
+           revision = Number(result?.revision || remote.revision + 1);
+         }catch(error){
+-          if(attempt === 0 && String(error?.message || error).includes('REVISION_CONFLICT')) continue;
++          const pushMessage=String(error?.message || error);
++          if(attempt < 4 && /REVISION_CONFLICT|DEVICE_SYNC_BUSY|混み合/.test(pushMessage)){
++            await new Promise(resolve=>setTimeout(resolve,350*(attempt+1)));
++            continue;
++          }
+           throw error;
+         }
+       }
+@@ -25589,7 +25602,8 @@
+     }
+   }catch(error){
+     const message = String(error?.message || error);
+-    const temporary=/タイムアウト|接続できません|通信|network|load failed/i.test(message);
++    const revisionConflict=/REVISION_CONFLICT|DEVICE_SYNC_BUSY|混み合/.test(message);
++    const temporary=revisionConflict||/タイムアウト|接続できません|通信|network|load failed/i.test(message);
+     if(temporary)console.info('端末同期は次回再試行します:',message);
+     else console.warn('端末同期を完了できませんでした:',error);
+     localStorage.setItem(DEVICE_AUTO_SYNC_LAST_ERROR_STORAGE,message);
+@@ -25605,7 +25619,7 @@
+     clearTimeout(deviceAutoSyncTimer);
+     deviceAutoSyncTimer = setTimeout(
+       () => deviceAutoSyncRun('エラー後の自動再試行'),
+-      temporary ? 45000 : 120000
++      revisionConflict ? 8000 : (temporary ? 45000 : 120000)
+     );
+     return false;
+   }finally{
+@@ -32159,7 +32173,17 @@
        const entry=incomingById.get(id);
        if(entry){nextEntries.push(entry);seenEntryIds.add(id);}
      });
@@ -69,7 +112,7 @@
  
      const profileRecord=active.find(record=>isProfileId(record.id));
      if(profileRecord)await deviceSyncApplyProfileRecord(profileRecord);
-@@ -32615,16 +32632,48 @@
+@@ -32615,16 +32639,48 @@
      const rows=entryPhotoDeleteMap();
      if(Object.prototype.hasOwnProperty.call(rows,id)){delete rows[id];writeEntryPhotoDeleteMap(rows);}
    }
@@ -122,7 +165,7 @@
      }
      scheduleBinaryRefresh('photo');
      scheduleSync('登録画像変更',900);
-@@ -32981,7 +33030,11 @@
+@@ -32981,7 +33037,11 @@
        records.push({id:indexId,updatedAt:stableAt(kind+':index',JSON.stringify(indexData)),deletedAt:'',deviceId,data:indexData});
      }
      ids.forEach(itemId=>{
@@ -135,7 +178,7 @@
        parts.forEach((chunk,index)=>{const id=`${prefix}${token}:${index}`;clearDeletion(id);records.push({id,updatedAt,deletedAt:'',deviceId,data:{kind:kind+'_chunk_v1',itemId,part:index,total:parts.length,text:chunk}});});
        if(kind==='entry_photo')records.push({id:`${ENTRY_PHOTO_STATE_PREFIX}${token}`,updatedAt,deletedAt:'',deviceId,data:{kind:'entry_photo_state_v2',itemId,state:'set'}});
      });
-@@ -33100,6 +33153,8 @@
+@@ -33100,6 +33160,8 @@
        if(data){
          finalMap.set(id,data);
          clearEntryPhotoDeleted(id);
@@ -144,7 +187,7 @@
        }
      });
      const validEntryIds=new Set((state.entries||[]).map(entry=>String(entry?.id||'')).filter(Boolean));
-@@ -33262,4 +33317,5 @@
+@@ -33262,4 +33324,5 @@
  // RC1.4.539: 手動同期のstale revision競合を自動再取得・再統合。『今すぐ同期』を1操作で完了する方式へ。
  // RC1.4.540: 登録画像の同期競合を修正。IndexedDB画像準備前の自動同期を待機し、古い『画像なし』indexで写真を消さない。
  // RC1.4.541: 登録画像を論理単位で同期。空manifestを変更扱いしない・chunk単体でも復元・540以前の誤削除tombstoneを無効化・画像削除は明示stateだけで反映。
