@@ -14,16 +14,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Prepare RC543 candidate
+      - name: Prepare current production app
         run: |
           npm init -y
           npm i playwright@1.48.2
           npx playwright install chromium --with-deps
-          curl -fsSL 'https://hilarious-haupia-6e0406.netlify.app/assets/app-core-542.js' -o app-core-542.js
-          cp app-core-542.js app-core-543-candidate.js
-          patch app-core-543-candidate.js < mitekore-rc543-candidate.patch
-          patch app-core-543-candidate.js < mitekore-rc543-delete-race.patch
-          node --check app-core-543-candidate.js
+          curl -fsSL 'https://hilarious-haupia-6e0406.netlify.app/' -o current-index.html
+          ASSET=$(grep -oE 'assets/app-core-[A-Za-z0-9._-]+\.js' current-index.html | head -1)
+          test -n "$ASSET"
+          echo "CURRENT_ASSET=$ASSET" >> "$GITHUB_ENV"
+          echo "Current asset: $ASSET"
+          curl -fsSL "https://hilarious-haupia-6e0406.netlify.app/$ASSET" -o app-core-current.js
+          node --check app-core-current.js
       - name: Discover all visible features
         run: node mitekore-full-discovery.js
       - name: Upload discovery evidence
@@ -32,6 +34,8 @@ jobs:
         with:
           name: mitekore-full-discovery
           path: |
+            current-index.html
+            app-core-current.js
             full-discovery.json
             discovery-*.json
             discovery-*.png
