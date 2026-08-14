@@ -17,92 +17,154 @@ jobs:
           npm init -y
           npm i playwright@1.48.2
           npx playwright install chromium --with-deps
-      - name: Run production diagnostic
+      - name: Run real two-device production test
         run: |
           cat > test.js <<'EOF'
           const { chromium } = require('playwright');
           const fs = require('fs');
-          (async()=>{
-            const NAME='ChatGPT同期検証0814';
-            const USER='chatgpt_sync_test_0814';
-            const APP='https://hilarious-haupia-6e0406.netlify.app/';
-            const browser=await chromium.launch({headless:true});
-            const ctx=await browser.newContext({viewport:{width:1440,height:1000}});
-            const net=[];
-            const consoleLogs=[];
-            const page=await ctx.newPage();
-            page.on('console',m=>consoleLogs.push(`${m.type()}: ${m.text()}`));
-            page.on('pageerror',e=>consoleLogs.push('PAGEERROR: '+e.message));
-            page.on('request',req=>{
-              const u=req.url();
-              if(/script\.google\.com|script\.googleusercontent\.com|googleapis\.com/i.test(u)){
-                net.push({kind:'request',method:req.method(),url:u,postData:req.postData()||''});
-              }
-            });
-            page.on('response',async res=>{
-              const u=res.url();
-              if(/script\.google\.com|script\.googleusercontent\.com|googleapis\.com/i.test(u)){
-                let text=''; try{text=(await res.text()).slice(0,5000)}catch(e){text='[unreadable:'+e.message+']'}
-                net.push({kind:'response',status:res.status(),url:u,text});
-              }
-            });
-            await page.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});
-            await page.waitForTimeout(7000);
-            const discovered=await page.evaluate(async({NAME,USER})=>{
-              const ls={}; for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i); ls[k]=localStorage.getItem(k)}
-              localStorage.setItem('fujiya_collection_user_id',USER);
+          const APP='https://hilarious-haupia-6e0406.netlify.app/';
+          const NAME='ChatGPT同期検証0814';
+          const OWNER='fujiya_08140814-5420-4542-8542-081408140814';
+          const log=[];
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          async function dismiss(page){
+            for(const sel of ['[data-profile-unlock-close]','#rareBurstCloseBtn','.mike-talk-close','#tutorialCloseBtn','#firstRunCloseBtn','[data-device-pair-incoming-close]']){
+              try{const el=page.locator(sel).first(); if(await el.count()&&await el.isVisible()) await el.click({timeout:700});}catch(e){}
+            }
+          }
+          async function initContext(browser,phone=false){
+            const ctx=await browser.newContext(phone?{viewport:{width:390,height:844},isMobile:true,hasTouch:true}:{viewport:{width:1440,height:1000}});
+            await ctx.addInitScript(({NAME,OWNER,phone})=>{
+              localStorage.setItem('fujiya_mitekore_early_access_v2',JSON.stringify({orderNumber:'99999999',verifiedAt:Date.now(),campaign:'test-order'}));
+              localStorage.setItem('fujiya_collection_setup_done_v1','1');
+              localStorage.setItem('fujiya_collection_tutorial_seen_v2_rc1474','1');
+              localStorage.setItem('fujiya_collection_first_run_seen_v20_2_35cn','1');
               localStorage.setItem('fujiya_collection_user_name',NAME);
               localStorage.setItem('fujiya_collection_share_opt_in_v1','1');
               localStorage.setItem('fujiya_collection_share_purchase_price_opt_in_v1','1');
-              localStorage.setItem('fujiya_collection_profile_v20_1',JSON.stringify({name:NAME,bio:'ChatGPT本番同期検証',favoritePlatforms:['GBA'],favoriteGames:['ポケットモンスター ファイアレッド'],links:{},visibility:{}}));
-              localStorage.setItem('fujiya_collection_profile_v20_1_updated_at',new Date().toISOString());
-              const fn={};
-              for(const n of ['fujiyaMiteRecoSyncProfile','getGasEndpoint','submitGasPostFormNoWait','deviceSyncPush','deviceSyncPull']){
-                try{fn[n]=typeof window[n]==='function'?window[n].toString().slice(0,12000):String(typeof window[n])}catch(e){fn[n]='ERR '+e.message}
+              if(!phone){
+                localStorage.setItem('fujiya_collection_user_id',OWNER);
+                localStorage.setItem('fujiya_collection_profile_v20_1',JSON.stringify({name:NAME,bio:'本番2端末画像同期テスト',favoritePlatforms:['SFC','GBA'],favoriteGames:['夢幻の如く','ポケットモンスター ファイアレッド'],links:{},visibility:{}}));
+                localStorage.setItem('fujiya_collection_profile_v20_1_updated_at',new Date().toISOString());
               }
-              const scripts=[...document.scripts].map(s=>s.src).filter(Boolean);
-              const hits=[];
-              for(const src of scripts){
-                try{
-                  const txt=await (await fetch(src,{cache:'no-store'})).text();
-                  for(const needle of ['fujiyaMiteRecoSyncProfile','script.google.com/macros/s/','mite_reco_profile','profile_sync','users']){
-                    const i=txt.indexOf(needle);
-                    if(i>=0) hits.push({src,needle,snippet:txt.slice(Math.max(0,i-2500),Math.min(txt.length,i+7000))});
-                  }
-                }catch(e){hits.push({src,error:String(e)})}
-              }
-              return {href:location.href,title:document.title,version:document.body.innerText.match(/RC1\.4\.\d+/)?.[0]||'',scripts,fn,hits,localStorageBefore:ls};
-            },{NAME,USER});
-            await page.reload({waitUntil:'domcontentloaded',timeout:60000});
-            await page.waitForTimeout(6000);
-            let profileResult;
-            try{
-              profileResult=await page.evaluate(async()=>{
-                if(typeof window.fujiyaMiteRecoSyncProfile!=='function') return {available:false};
-                try{return {available:true,value:await window.fujiyaMiteRecoSyncProfile({force:true})};}
-                catch(e){return {available:true,error:String(e&&e.stack||e)}};
-              });
-            }catch(e){profileResult={evalError:String(e)}}
-            await page.waitForTimeout(8000);
-            await page.screenshot({path:'mitekore-prod-diagnostic.png',fullPage:false});
-            const after=await page.evaluate(()=>{
-              const out={}; for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i); if(/user|profile|share|sync/i.test(k)) out[k]=localStorage.getItem(k)} return out;
+            },{NAME,OWNER,phone});
+            return ctx;
+          }
+          async function register(page,platform,title){
+            await dismiss(page);
+            await page.locator('[data-ui-tab="register"]:visible').first().click({timeout:10000});
+            await sleep(500);
+            const quick=page.locator('#quickRegisterModeBtn');
+            if(await quick.count()&&await quick.isVisible()) { await quick.click(); await sleep(250); }
+            await page.locator('#platform').fill(platform);
+            await page.locator('#title').fill(title);
+            await page.locator('#title').dispatchEvent('input');
+            await sleep(900);
+            await page.locator('#saveBtn').click({timeout:10000});
+            await sleep(1800);
+            await dismiss(page);
+          }
+          async function stateInfo(page){
+            return await page.evaluate(()=>{
+              let root={};try{root=JSON.parse(localStorage.getItem('fujiya_collection_v1')||'{}')}catch(e){}
+              const entries=Array.isArray(root.entries)?root.entries:[];
+              return {userId:localStorage.getItem('fujiya_collection_user_id')||'',entries:entries.map(e=>({id:e.id,title:e.title,platform:e.platform,updatedAt:e.updatedAt,hasPhotoData:!!e.photoData}))};
             });
-            const result={discovered,profileResult,network:net,console:consoleLogs,localStorageAfter:after};
+          }
+          async function idbPhoto(page,id){
+            return await page.evaluate(async id=>{
+              try{
+                const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('fujiya_collection_entry_photos_v1');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});
+                const row=await new Promise((resolve,reject)=>{const tx=db.transaction('photos','readonly');const r=tx.objectStore('photos').get(id);r.onsuccess=()=>resolve(r.result||null);r.onerror=()=>reject(r.error)});
+                db.close();return {exists:!!row?.data,length:String(row?.data||'').length,updatedAt:String(row?.updatedAt||'')};
+              }catch(e){return {exists:false,error:String(e)}}
+            },id);
+          }
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const pcCtx=await initContext(browser,false);
+            const pc=await pcCtx.newPage();
+            pc.on('console',m=>{if(/同期|画像|DEVICE_SYNC|登録画像/.test(m.text()))log.push('PC '+m.type()+': '+m.text())});
+            pc.on('pageerror',e=>log.push('PC PAGEERROR '+e.message));
+            await pc.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});
+            await sleep(6500);await dismiss(pc);
+            const version=await pc.evaluate(()=>document.body.innerText.match(/RC1\.4\.\d+/)?.[0]||'');
+            await register(pc,'SFC','夢幻の如く');
+            await register(pc,'GBA','ポケットモンスター ファイアレッド');
+            let pcState=await stateInfo(pc);
+            if(pcState.entries.length<2) throw new Error('PCで2件登録できていない '+JSON.stringify(pcState));
+            const fire=pcState.entries.find(e=>e.title==='ポケットモンスター ファイアレッド');
+            const mugen=pcState.entries.find(e=>e.title==='夢幻の如く');
+            if(!fire||!mugen) throw new Error('登録タイトルを取得できない');
+
+            // Visible UI: その他 → PC・スマホ同期 → QR表示
+            const more=pc.locator('[data-desktop-more]:visible').first();
+            await more.click({timeout:10000});await sleep(250);
+            await pc.locator('[data-desktop-tab="sync"]:visible').click({timeout:10000});await sleep(500);
+            await pc.locator('#devicePairShowQrBtn:visible').click({timeout:10000});
+            await pc.waitForFunction(()=>document.querySelector('#devicePairUrl')?.dataset?.url,{timeout:30000});
+            const pairUrl=await pc.locator('#devicePairUrl').evaluate(el=>el.dataset.url||'');
+            if(!pairUrl) throw new Error('接続URLが生成されていない');
+
+            const phoneCtx=await initContext(browser,true);
+            const phone=await phoneCtx.newPage();
+            phone.on('console',m=>{if(/同期|画像|DEVICE_SYNC|登録画像|接続/.test(m.text()))log.push('PHONE '+m.type()+': '+m.text())});
+            phone.on('pageerror',e=>log.push('PHONE PAGEERROR '+e.message));
+            await phone.goto(pairUrl,{waitUntil:'domcontentloaded',timeout:60000});
+            await phone.waitForFunction(()=>document.body.innerText.includes('端末の接続が完了しました')||document.body.innerText.includes('接続完了：登録2件'),{timeout:180000});
+            await sleep(2500);await dismiss(phone);
+            let phoneState=await stateInfo(phone);
+            if(!phoneState.entries.some(e=>e.id===fire.id)&&!phoneState.entries.some(e=>e.title===fire.title)) throw new Error('接続後スマホにFireRedがない '+JSON.stringify(phoneState));
+
+            // PCの実UIからFireRedを編集し、実ファイルを画像入力へ入れて保存。
+            await pc.locator('[data-ui-tab="list"]:visible').first().click({timeout:10000});await sleep(1000);
+            const edit=pc.locator(`button[data-action="edit"][data-id="${fire.id}"]`).first();
+            await edit.click({timeout:10000});await sleep(500);
+            fs.writeFileSync('sync-test.svg','<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="#6f42c1"/><rect x="24" y="24" width="592" height="432" rx="28" fill="#f4c542"/><circle cx="320" cy="240" r="130" fill="#d43f3a"/><text x="320" y="260" font-size="48" font-family="sans-serif" text-anchor="middle" fill="white">SYNC 0814</text></svg>');
+            await pc.locator('#photo').setInputFiles({name:'sync-test.svg',mimeType:'image/svg+xml',buffer:fs.readFileSync('sync-test.svg')});
+            await pc.waitForFunction(()=>{const img=document.querySelector('#photoPreview');return img&&img.style.display!=='none'&&String(img.src).startsWith('data:image/')},{timeout:20000});
+            await pc.locator('#saveBtn').click({timeout:10000});
+            await sleep(3500);
+            const pcPhoto=await idbPhoto(pc,fire.id);
+            if(!pcPhoto.exists) throw new Error('PC保存後IndexedDBに画像がない '+JSON.stringify(pcPhoto));
+            // 実画面を撮る。生成画像ではなく実ブラウザ画面。
+            await pc.locator('[data-ui-tab="list"]:visible').first().click({timeout:10000});await sleep(1200);
+            await pc.screenshot({path:'pc-after-photo.png',fullPage:false});
+
+            // 手動同期は使わない。保存後の自動同期を待ち、スマホをリロードして自動受信。
+            await sleep(18000);
+            await phone.reload({waitUntil:'domcontentloaded',timeout:60000});
+            await sleep(12000);await dismiss(phone);
+            const mobileList=phone.locator('[data-mobile-tab="list"]:visible').first();
+            if(await mobileList.count()) {await mobileList.click();await sleep(1200);}
+            phoneState=await stateInfo(phone);
+            const phoneFire=phoneState.entries.find(e=>e.id===fire.id)||phoneState.entries.find(e=>e.title===fire.title);
+            const phonePhoto=phoneFire?await idbPhoto(phone,phoneFire.id):{exists:false,error:'entry missing'};
+            const phonePhotoVisible=phoneFire?await phone.locator(`button[data-action="edit"][data-id="${phoneFire.id}"]`).first().evaluate(el=>{
+              const card=el.closest('.card,.retro-game-card,.list-card,[data-entry-id]')||el.parentElement?.parentElement?.parentElement;
+              return !!card?.querySelector('img[src^="data:image/"]');
+            }).catch(()=>false):false;
+            await phone.screenshot({path:'phone-after-sync.png',fullPage:false});
+            pcState=await stateInfo(pc);
+            const pcOrder=pcState.entries.slice().sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))).map(e=>e.title);
+            const phoneOrder=phoneState.entries.slice().sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))).map(e=>e.title);
+            const result={version,ownerUserId:OWNER,fireId:fire.id,mugenId:mugen.id,pcPhoto,phonePhoto,phonePhotoVisible,pcOrder,phoneOrder,pcEntries:pcState.entries,phoneEntries:phoneState.entries,log};
             fs.writeFileSync('result.json',JSON.stringify(result,null,2));
-            console.log('PROFILE_RESULT',JSON.stringify(profileResult));
-            console.log('NETWORK',JSON.stringify(net,null,2));
-            console.log('FUNCTIONS',JSON.stringify(discovered.fn,null,2));
-            console.log('HITS',JSON.stringify(discovered.hits,null,2));
+            console.log('RESULT '+JSON.stringify(result));
             await browser.close();
-          })().catch(e=>{console.error(e);process.exit(1)});
+            if(!phonePhoto.exists) process.exitCode=21;
+            if(pcOrder[0]!=='ポケットモンスター ファイアレッド') process.exitCode=22;
+            if(phoneOrder[0]!=='ポケットモンスター ファイアレッド') process.exitCode=23;
+          })().catch(e=>{console.error('E2E_FATAL',e);fs.writeFileSync('fatal.txt',String(e&&e.stack||e));process.exit(1)});
           EOF
           node test.js
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mitekore-prod-diagnostic
+          name: mitekore-prod-two-device-evidence
           path: |
-            mitekore-prod-diagnostic.png
+            pc-after-photo.png
+            phone-after-sync.png
             result.json
+            fatal.txt
