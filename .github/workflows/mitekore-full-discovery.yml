@@ -1,0 +1,38 @@
+name: MiteKore Full Discovery
+on:
+  push:
+    paths:
+      - 'mitekore-full-discovery.js'
+      - '.github/workflows/mitekore-full-discovery.yml'
+  workflow_dispatch:
+jobs:
+  discovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare RC543 candidate
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+          curl -fsSL 'https://hilarious-haupia-6e0406.netlify.app/assets/app-core-542.js' -o app-core-542.js
+          cp app-core-542.js app-core-543-candidate.js
+          patch app-core-543-candidate.js < mitekore-rc543-candidate.patch
+          patch app-core-543-candidate.js < mitekore-rc543-delete-race.patch
+          node --check app-core-543-candidate.js
+      - name: Discover all visible features
+        run: node mitekore-full-discovery.js
+      - name: Upload discovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-full-discovery
+          path: |
+            full-discovery.json
+            discovery-*.json
+            discovery-*.png
+            discovery-fatal.txt
