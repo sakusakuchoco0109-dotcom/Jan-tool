@@ -39,7 +39,26 @@
          // 旧データ読込時に欠落時刻を「現在時刻」にしていた版があり、触っていないタイトルが
          // スマホだけ先頭へ浮上する原因になった。実操作マーカーが無ければクラウド時刻へ収束させる。
          const explicit=deviceSyncExplicitEditMap();
-@@ -32615,16 +32620,48 @@
+@@ -32159,7 +32164,17 @@
+       const entry=incomingById.get(id);
+       if(entry){nextEntries.push(entry);seenEntryIds.add(id);}
+     });
+-    state.entries=nextEntries;
++    // RC1.4.543: 端末同期で更新された登録も、編集した端末と同じ「最終更新が新しい順」へ収束させる。
++    // 受信側だけ旧配列位置を維持すると、画像追加済みタイトルが元位置のまま・未操作タイトルが先頭に残る。
++    state.entries=nextEntries.slice().sort((a,b)=>{
++      const au=Date.parse(String(a?.updatedAt||a?.createdAt||''))||0;
++      const bu=Date.parse(String(b?.updatedAt||b?.createdAt||''))||0;
++      if(au!==bu)return bu-au;
++      const ac=Date.parse(String(a?.createdAt||''))||0;
++      const bc=Date.parse(String(b?.createdAt||''))||0;
++      if(ac!==bc)return bc-ac;
++      return String(a?.id||'').localeCompare(String(b?.id||''));
++    });
+ 
+     const profileRecord=active.find(record=>isProfileId(record.id));
+     if(profileRecord)await deviceSyncApplyProfileRecord(profileRecord);
+@@ -32615,16 +32630,48 @@
      const rows=entryPhotoDeleteMap();
      if(Object.prototype.hasOwnProperty.call(rows,id)){delete rows[id];writeEntryPhotoDeleteMap(rows);}
    }
@@ -92,7 +111,7 @@
      }
      scheduleBinaryRefresh('photo');
      scheduleSync('登録画像変更',900);
-@@ -32981,7 +33018,11 @@
+@@ -32981,7 +33028,11 @@
        records.push({id:indexId,updatedAt:stableAt(kind+':index',JSON.stringify(indexData)),deletedAt:'',deviceId,data:indexData});
      }
      ids.forEach(itemId=>{
@@ -105,7 +124,7 @@
        parts.forEach((chunk,index)=>{const id=`${prefix}${token}:${index}`;clearDeletion(id);records.push({id,updatedAt,deletedAt:'',deviceId,data:{kind:kind+'_chunk_v1',itemId,part:index,total:parts.length,text:chunk}});});
        if(kind==='entry_photo')records.push({id:`${ENTRY_PHOTO_STATE_PREFIX}${token}`,updatedAt,deletedAt:'',deviceId,data:{kind:'entry_photo_state_v2',itemId,state:'set'}});
      });
-@@ -33100,6 +33141,8 @@
+@@ -33100,6 +33151,8 @@
        if(data){
          finalMap.set(id,data);
          clearEntryPhotoDeleted(id);
@@ -114,9 +133,10 @@
        }
      });
      const validEntryIds=new Set((state.entries||[]).map(entry=>String(entry?.id||'')).filter(Boolean));
-@@ -33262,4 +33305,4 @@
+@@ -33262,4 +33315,5 @@
  // RC1.4.539: 手動同期のstale revision競合を自動再取得・再統合。『今すぐ同期』を1操作で完了する方式へ。
  // RC1.4.540: 登録画像の同期競合を修正。IndexedDB画像準備前の自動同期を待機し、古い『画像なし』indexで写真を消さない。
  // RC1.4.541: 登録画像を論理単位で同期。空manifestを変更扱いしない・chunk単体でも復元・540以前の誤削除tombstoneを無効化・画像削除は明示stateだけで反映。
 -// RC1.4.542: 欠落updatedAtを現在時刻にしない。時刻だけの偽差分をクラウドへ収束。画像保存時はIndexedDB同期キャッシュ確定後に送信。
 +// RC1.4.543: 欠落updatedAtを現在時刻にしない。時刻だけの偽差分をクラウドへ収束。画像保存時はIndexedDB同期キャッシュ確定後に送信。
++// RC1.4.543: 同期受信後の登録並びもupdatedAt順へ収束し、編集済みタイトルが受信側だけ元位置に残る問題を修正。
