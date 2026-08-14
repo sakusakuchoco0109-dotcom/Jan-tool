@@ -5,6 +5,7 @@ on:
       - '.github/workflows/mitekore-real-e2e.yml'
       - 'mitekore-e2e-test.js'
       - 'mitekore-rc543-candidate.patch'
+      - 'mitekore-rc543-delete-race.patch'
   workflow_dispatch:
 jobs:
   real-e2e:
@@ -23,6 +24,7 @@ jobs:
           curl -fsSL 'https://hilarious-haupia-6e0406.netlify.app/assets/app-core-542.js' -o app-core-542.js
           cp app-core-542.js app-core-543-candidate.js
           patch app-core-543-candidate.js < mitekore-rc543-candidate.patch
+          patch app-core-543-candidate.js < mitekore-rc543-delete-race.patch
           node --check app-core-543-candidate.js
           grep -q 'RC1.4.543' app-core-543-candidate.js
       - name: Make real UI clicks resilient to visible notices
