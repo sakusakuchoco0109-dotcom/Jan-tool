@@ -7,11 +7,11 @@
      }
 +    // RC1.4.543: 起動直前に相手端末が送信を始めた場合、最初のpullがクラウド書込より
 +    // 数秒だけ先行すると、そのまま次の2分周期まで更新を取り逃していた。
-+    // 接続済み端末だけ、起動直後に2回だけ追跡確認して短時間で収束させる。
-+    [10000,22000].forEach((delay,index)=>{
++    // 接続済み端末だけ、起動直後に3回だけ追跡確認して短時間で収束させる。
++    [10000,22000,40000].forEach((delay,index)=>{
 +      setTimeout(()=>{
 +        if(!deviceAutoSyncEnabled() || document.hidden) return;
-+        const reason=index===0?'起動後の追跡確認':'起動後の再追跡確認';
++        const reason=index===0?'起動後の追跡確認':(index===1?'起動後の再追跡確認':'起動後の最終追跡確認');
 +        if(fujiyaUiInteractionBusy()){
 +          deviceAutoSyncSchedule(reason,1500,false);
 +          return;
