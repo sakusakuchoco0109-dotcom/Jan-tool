@@ -70,6 +70,7 @@ jobs:
           const resultTo="const result={version,ownerUserId,fireId:fire.id,mugenId:mugen.id,pairUrlGenerated:!!pairUrl,pcPhoto,phonePhoto,captured,deletePhonePhoto,readdPhonePhoto,deleteCaptured,readdCaptured,";
           if(!s.includes(resultFrom))throw new Error('result anchor not found');
           s=s.replace(resultFrom,resultTo);
+          s=s.replaceAll("await sleep(14000);await dismiss(phone);","await sleep(44000);await dismiss(phone);");
           fs.writeFileSync(p,s);
           NODE
           node --check mitekore-e2e-test.js
@@ -81,6 +82,7 @@ jobs:
         with:
           name: mitekore-rc543-real-evidence
           path: |
+            app-core-543-candidate.js
             01-pc-pair-qr.png
             02-phone-paired.png
             03-pc-photo-saved.png
