@@ -1,0 +1,37 @@
+name: MiteKore Community Audit V2
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-community-audit-v2.yml'
+      - 'mitekore-community-audit-v2.js'
+  workflow_dispatch:
+jobs:
+  audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [mitereco, mitemaga]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare browser
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+      - name: Run production community audit v2
+        env:
+          AUDIT_MODE: ${{ matrix.mode }}
+        run: node mitekore-community-audit-v2.js
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-community-v2-${{ matrix.mode }}
+          path: |
+            community-audit-v2-result.json
+            community-v2-*.png
