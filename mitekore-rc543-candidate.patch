@@ -44,9 +44,9 @@
      return false;
    }
 -  if(deviceAutoSyncBusy || deviceSyncBusy || devicePairIncomingBusy || deviceSyncPreviewState || deviceSharedIdentityPromise || window.__fujiyaAutoReceiveBusy){
-+  // RC1.4.543: 共有IDのGAS側alias整理はローカル本人ID確定後に非同期で続く。
-+  // その長い通信待ちで端末同期まで止めると、画像編集が次の定期確認まで送れないためブロック対象から外す。
-+  if(deviceAutoSyncBusy || deviceSyncBusy || devicePairIncomingBusy || deviceSyncPreviewState || window.__fujiyaAutoReceiveBusy){
++  // RC1.4.543: 共有ID整理・共有所持率などの自動受信は端末同期とは独立したバックグラウンド処理。
++  // ここで待たせると画像送信やリロード直後のpullが20〜30秒以上遅れるため、端末同期のブロック対象にしない。
++  if(deviceAutoSyncBusy || deviceSyncBusy || devicePairIncomingBusy || deviceSyncPreviewState){
      deviceAutoSyncSchedule(reason,5000,false);
      return false;
    }
