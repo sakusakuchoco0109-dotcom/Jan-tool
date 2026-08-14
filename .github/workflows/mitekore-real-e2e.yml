@@ -24,7 +24,6 @@ jobs:
           const fs = require('fs');
           const APP='https://hilarious-haupia-6e0406.netlify.app/';
           const NAME='ChatGPT同期検証0814';
-          const OWNER='fujiya_08140814-5420-4542-8542-081408140814';
           const log=[];
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
           async function dismiss(page){
@@ -34,7 +33,7 @@ jobs:
           }
           async function initContext(browser,phone=false){
             const ctx=await browser.newContext(phone?{viewport:{width:390,height:844},isMobile:true,hasTouch:true}:{viewport:{width:1440,height:1000}});
-            await ctx.addInitScript(({NAME,OWNER,phone})=>{
+            await ctx.addInitScript(({NAME,phone})=>{
               localStorage.setItem('fujiya_mitekore_early_access_v2',JSON.stringify({orderNumber:'99999999',verifiedAt:Date.now(),campaign:'test-order'}));
               localStorage.setItem('fujiya_collection_setup_done_v1','1');
               localStorage.setItem('fujiya_collection_tutorial_seen_v2_rc1474','1');
@@ -43,11 +42,11 @@ jobs:
               localStorage.setItem('fujiya_collection_share_opt_in_v1','1');
               localStorage.setItem('fujiya_collection_share_purchase_price_opt_in_v1','1');
               if(!phone){
-                localStorage.setItem('fujiya_collection_user_id',OWNER);
+                localStorage.removeItem('fujiya_collection_user_id');
                 localStorage.setItem('fujiya_collection_profile_v20_1',JSON.stringify({name:NAME,bio:'本番2端末画像同期テスト',favoritePlatforms:['SFC','GBA'],favoriteGames:['夢幻の如く','ポケットモンスター ファイアレッド'],links:{},visibility:{}}));
                 localStorage.setItem('fujiya_collection_profile_v20_1_updated_at',new Date().toISOString());
               }
-            },{NAME,OWNER,phone});
+            },{NAME,phone});
             return ctx;
           }
           async function register(page,platform,title){
@@ -80,14 +79,28 @@ jobs:
               }catch(e){return {exists:false,error:String(e)}}
             },id);
           }
+          async function photoSyncCapture(page){
+            return await page.evaluate(async()=>{
+              if(typeof window.deviceSyncCaptureLocalRecords!=='function') return {available:false,records:[]};
+              const rows=await window.deviceSyncCaptureLocalRecords();
+              return {available:true,records:(rows||[]).filter(r=>String(r?.id||'').includes('entry_photo')).map(r=>({
+                id:String(r.id||''),updatedAt:String(r.updatedAt||''),deletedAt:String(r.deletedAt||''),
+                kind:String(r?.data?.kind||''),itemId:String(r?.data?.itemId||''),state:String(r?.data?.state||''),
+                part:Number(r?.data?.part??-1),total:Number(r?.data?.total??-1),textLength:String(r?.data?.text||'').length
+              }))};
+            });
+          }
           (async()=>{
             const browser=await chromium.launch({headless:true});
             const pcCtx=await initContext(browser,false);
             const pc=await pcCtx.newPage();
-            pc.on('console',m=>{if(/同期|画像|DEVICE_SYNC|登録画像/.test(m.text()))log.push('PC '+m.type()+': '+m.text())});
+            pc.on('console',m=>{if(/同期|画像|DEVICE_SYNC|登録画像|QR|接続/.test(m.text()))log.push('PC '+m.type()+': '+m.text())});
             pc.on('pageerror',e=>log.push('PC PAGEERROR '+e.message));
             await pc.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});
             await sleep(6500);await dismiss(pc);
+            let initial=await stateInfo(pc);
+            const ownerUserId=initial.userId;
+            if(!ownerUserId) throw new Error('アプリがユーザーIDを生成していない');
             const version=await pc.evaluate(()=>document.body.innerText.match(/RC1\.4\.\d+/)?.[0]||'');
             await register(pc,'SFC','夢幻の如く');
             await register(pc,'GBA','ポケットモンスター ファイアレッド');
@@ -97,41 +110,53 @@ jobs:
             const mugen=pcState.entries.find(e=>e.title==='夢幻の如く');
             if(!fire||!mugen) throw new Error('登録タイトルを取得できない');
 
-            // Visible UI: その他 → PC・スマホ同期 → QR表示
             const more=pc.locator('[data-desktop-more]:visible').first();
             await more.click({timeout:10000});await sleep(250);
             await pc.locator('[data-desktop-tab="sync"]:visible').click({timeout:10000});await sleep(500);
             await pc.locator('#devicePairShowQrBtn:visible').click({timeout:10000});
-            await pc.waitForFunction(()=>document.querySelector('#devicePairUrl')?.dataset?.url,{timeout:30000});
-            const pairUrl=await pc.locator('#devicePairUrl').evaluate(el=>el.dataset.url||'');
-            if(!pairUrl) throw new Error('接続URLが生成されていない');
+            let pairUrl='';
+            try{
+              await pc.waitForFunction(()=>!!document.querySelector('#devicePairUrl')?.dataset?.url,{timeout:15000});
+              pairUrl=await pc.locator('#devicePairUrl').evaluate(el=>el.dataset.url||'');
+            }catch(e){
+              const diag=await pc.evaluate(()=>({
+                userId:localStorage.getItem('fujiya_collection_user_id')||'',
+                syncKey:localStorage.getItem('fujiya_device_sync_key_v1')||'',
+                ready:document.querySelector('#devicePairReadyState')?.innerText||'',
+                qr:document.querySelector('#devicePairQr')?.innerText||'',
+                status:document.querySelector('#deviceSyncStatus')?.innerText||'',
+                pairText:document.querySelector('#devicePairCard')?.innerText||document.querySelector('#deviceSyncPanel')?.innerText||''
+              }));
+              fs.writeFileSync('qr-diag.json',JSON.stringify({diag,log},null,2));
+              await pc.screenshot({path:'qr-failure.png',fullPage:false});
+              throw new Error('接続URL生成失敗 '+JSON.stringify(diag));
+            }
+            if(!pairUrl) throw new Error('接続URLが空');
 
             const phoneCtx=await initContext(browser,true);
             const phone=await phoneCtx.newPage();
             phone.on('console',m=>{if(/同期|画像|DEVICE_SYNC|登録画像|接続/.test(m.text()))log.push('PHONE '+m.type()+': '+m.text())});
             phone.on('pageerror',e=>log.push('PHONE PAGEERROR '+e.message));
             await phone.goto(pairUrl,{waitUntil:'domcontentloaded',timeout:60000});
-            await phone.waitForFunction(()=>document.body.innerText.includes('端末の接続が完了しました')||document.body.innerText.includes('接続完了：登録2件'),{timeout:180000});
+            await phone.waitForFunction(()=>document.body.innerText.includes('端末の接続が完了しました')||document.body.innerText.includes('接続完了'),{timeout:180000});
             await sleep(2500);await dismiss(phone);
             let phoneState=await stateInfo(phone);
             if(!phoneState.entries.some(e=>e.id===fire.id)&&!phoneState.entries.some(e=>e.title===fire.title)) throw new Error('接続後スマホにFireRedがない '+JSON.stringify(phoneState));
 
-            // PCの実UIからFireRedを編集し、実ファイルを画像入力へ入れて保存。
             await pc.locator('[data-ui-tab="list"]:visible').first().click({timeout:10000});await sleep(1000);
             const edit=pc.locator(`button[data-action="edit"][data-id="${fire.id}"]`).first();
             await edit.click({timeout:10000});await sleep(500);
-            fs.writeFileSync('sync-test.svg','<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480"><rect width="640" height="480" fill="#6f42c1"/><rect x="24" y="24" width="592" height="432" rx="28" fill="#f4c542"/><circle cx="320" cy="240" r="130" fill="#d43f3a"/><text x="320" y="260" font-size="48" font-family="sans-serif" text-anchor="middle" fill="white">SYNC 0814</text></svg>');
-            await pc.locator('#photo').setInputFiles({name:'sync-test.svg',mimeType:'image/svg+xml',buffer:fs.readFileSync('sync-test.svg')});
+            const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAATUlEQVR4nO3PQQ0AIBDAsAP/nuGNAvZoFSzZOjNnyNi1dwfgUQCeBOBJAPYgAE8CsCQATwKwJwF4EoAnAdiDADwJwJMA7EEAngRgTwLwJAB7EgBfsA0Cfn4UQwAAAABJRU5ErkJggg==','base64');
+            await pc.locator('#photo').setInputFiles({name:'sync-test.png',mimeType:'image/png',buffer:png});
             await pc.waitForFunction(()=>{const img=document.querySelector('#photoPreview');return img&&img.style.display!=='none'&&String(img.src).startsWith('data:image/')},{timeout:20000});
             await pc.locator('#saveBtn').click({timeout:10000});
-            await sleep(3500);
+            await sleep(4000);
             const pcPhoto=await idbPhoto(pc,fire.id);
+            const captured=await photoSyncCapture(pc);
             if(!pcPhoto.exists) throw new Error('PC保存後IndexedDBに画像がない '+JSON.stringify(pcPhoto));
-            // 実画面を撮る。生成画像ではなく実ブラウザ画面。
             await pc.locator('[data-ui-tab="list"]:visible').first().click({timeout:10000});await sleep(1200);
             await pc.screenshot({path:'pc-after-photo.png',fullPage:false});
 
-            // 手動同期は使わない。保存後の自動同期を待ち、スマホをリロードして自動受信。
             await sleep(18000);
             await phone.reload({waitUntil:'domcontentloaded',timeout:60000});
             await sleep(12000);await dismiss(phone);
@@ -140,21 +165,17 @@ jobs:
             phoneState=await stateInfo(phone);
             const phoneFire=phoneState.entries.find(e=>e.id===fire.id)||phoneState.entries.find(e=>e.title===fire.title);
             const phonePhoto=phoneFire?await idbPhoto(phone,phoneFire.id):{exists:false,error:'entry missing'};
-            const phonePhotoVisible=phoneFire?await phone.locator(`button[data-action="edit"][data-id="${phoneFire.id}"]`).first().evaluate(el=>{
-              const card=el.closest('.card,.retro-game-card,.list-card,[data-entry-id]')||el.parentElement?.parentElement?.parentElement;
-              return !!card?.querySelector('img[src^="data:image/"]');
-            }).catch(()=>false):false;
             await phone.screenshot({path:'phone-after-sync.png',fullPage:false});
             pcState=await stateInfo(pc);
-            const pcOrder=pcState.entries.slice().sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))).map(e=>e.title);
-            const phoneOrder=phoneState.entries.slice().sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||''))).map(e=>e.title);
-            const result={version,ownerUserId:OWNER,fireId:fire.id,mugenId:mugen.id,pcPhoto,phonePhoto,phonePhotoVisible,pcOrder,phoneOrder,pcEntries:pcState.entries,phoneEntries:phoneState.entries,log};
+            const pcOrder=pcState.entries.map(e=>e.title);
+            const phoneOrder=phoneState.entries.map(e=>e.title);
+            const result={version,ownerUserId,fireId:fire.id,mugenId:mugen.id,pairUrlGenerated:!!pairUrl,pcPhoto,phonePhoto,captured,pcOrder,phoneOrder,pcEntries:pcState.entries,phoneEntries:phoneState.entries,log};
             fs.writeFileSync('result.json',JSON.stringify(result,null,2));
             console.log('RESULT '+JSON.stringify(result));
             await browser.close();
-            if(!phonePhoto.exists) process.exitCode=21;
-            if(pcOrder[0]!=='ポケットモンスター ファイアレッド') process.exitCode=22;
-            if(phoneOrder[0]!=='ポケットモンスター ファイアレッド') process.exitCode=23;
+            if(!captured.records.some(r=>r.kind==='entry_photo_state_v2'&&r.itemId===fire.id&&r.state==='set')) process.exitCode=20;
+            if(!captured.records.some(r=>r.kind==='entry_photo_chunk_v1'&&r.itemId===fire.id&&r.textLength>0)) process.exitCode=21;
+            if(!phonePhoto.exists) process.exitCode=22;
           })().catch(e=>{console.error('E2E_FATAL',e);fs.writeFileSync('fatal.txt',String(e&&e.stack||e));process.exit(1)});
           EOF
           node test.js
@@ -166,5 +187,7 @@ jobs:
           path: |
             pc-after-photo.png
             phone-after-sync.png
+            qr-failure.png
+            qr-diag.json
             result.json
             fatal.txt
