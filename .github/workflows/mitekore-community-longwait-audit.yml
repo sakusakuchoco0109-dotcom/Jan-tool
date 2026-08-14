@@ -1,0 +1,34 @@
+name: MiteKore Community Longwait Audit
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-community-longwait-audit.yml'
+      - 'mitekore-community-longwait-audit.js'
+  workflow_dispatch:
+jobs:
+  audit:
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [mitereco, mitemaga]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+      - env:
+          AUDIT_MODE: ${{ matrix.mode }}
+        run: node mitekore-community-longwait-audit.js
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-community-long-${{ matrix.mode }}
+          path: |
+            community-long-result.json
+            community-long-*.png
