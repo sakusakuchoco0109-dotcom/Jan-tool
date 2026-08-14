@@ -1,8 +1,6 @@
 --- app-core-543-candidate.js
 +++ app-core-543-candidate.js
-@@ -32678,18 +32678,21 @@
-   }
- 
+@@ -32679,14 +32679,19 @@
    async function refreshEntryPhotos(){
      try{
        const rows=typeof entryPhotoGetAllRecords==='function'?await entryPhotoGetAllRecords():[];
