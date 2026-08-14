@@ -1,0 +1,5 @@
+--- index.html
++++ index.html
+@@ -10289,7 +10289,7 @@
+-<header><div class="wrap hero"><div class="hero-brand"><div class="hero-logo-wrap"><img alt="みてコレ ロゴ" class="hero-logo" src="assets/mitekore-logo.webp"/><div class="hero-build-version" aria-label="現在のバージョン">RC1.4.543</div></div><h1 class="sr-only">みてコレ</h1><div class="subtitle">29 platforms unified</div><div class="hero-actions"><button class="ghost tutorial-open-btn" id="tutorialOpenTopBtn" type="button">使い方</button></div></div><div class="badge">V20.2.35ex RC1.4.543 先行体験版</div></div></header>
++<header><div class="wrap hero"><div class="hero-brand"><div class="hero-logo-wrap"><img alt="みてコレ ロゴ" class="hero-logo" src="assets/mitekore-logo.webp"/><div class="hero-build-version" aria-label="現在のバージョン">RC1.4.544</div></div><h1 class="sr-only">みてコレ</h1><div class="subtitle">29 platforms unified</div><div class="hero-actions"><button class="ghost tutorial-open-btn" id="tutorialOpenTopBtn" type="button">使い方</button></div></div><div class="badge">V20.2.35ex RC1.4.544 先行体験版</div></div></header>
