@@ -1,6 +1,27 @@
 --- app-core-543-candidate.js
 +++ app-core-543-candidate.js
-@@ -32679,14 +32679,19 @@
+@@ -25694,6 +25694,20 @@
+     }else{
+       // RC1.4.520: リロード/ホーム画面起動でも必ず1回pullする。画面操作は待たせない。
+       deviceAutoSyncSchedule('起動時のクラウド更新確認',2500,false);
+     }
++    // RC1.4.543: 起動直前に相手端末が送信を始めた場合、最初のpullがクラウド書込より
++    // 数秒だけ先行すると、そのまま次の2分周期まで更新を取り逃していた。
++    // 接続済み端末だけ、起動直後に2回だけ追跡確認して短時間で収束させる。
++    [10000,22000].forEach((delay,index)=>{
++      setTimeout(()=>{
++        if(!deviceAutoSyncEnabled() || document.hidden) return;
++        const reason=index===0?'起動後の追跡確認':'起動後の再追跡確認';
++        if(fujiyaUiInteractionBusy()){
++          deviceAutoSyncSchedule(reason,1500,false);
++          return;
++        }
++        deviceAutoSyncSchedule(reason,0,false);
++      },delay);
++    });
+   }
+ }
+@@ -32735,14 +32749,19 @@
    async function refreshEntryPhotos(){
      try{
        const rows=typeof entryPhotoGetAllRecords==='function'?await entryPhotoGetAllRecords():[];
