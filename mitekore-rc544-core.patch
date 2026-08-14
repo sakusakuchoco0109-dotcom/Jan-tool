@@ -1,0 +1,120 @@
+--- app-core-base.js
++++ app-core-544.js
+@@ -22838,8 +22838,21 @@
+     const statusEditTab = ev.target.closest('[data-quick-status-edit-tab]');
+     if(statusEditTab){
+       const requestedTab=String(statusEditTab.dataset.quickStatusEditTab||'basic');
+-      state.quickStatusEditTab=['basic','nickname','links','privacy'].includes(requestedTab)?requestedTab:'basic';
+-      renderQuickStatusBar();
++      const nextTab=['basic','nickname','links','privacy'].includes(requestedTab)?requestedTab:'basic';
++      state.quickStatusEditTab=nextTab;
++      // RC1.4.544: タブ切替では編集DOMを再生成しない。
++      // 入力途中の自己紹介・リンク等を保持したまま表示ペインだけ切り替える。
++      const editor=statusEditTab.closest('#quickProfileEditor')||document.getElementById('quickProfileEditor');
++      if(editor){
++        editor.querySelectorAll('[data-quick-status-edit-tab]').forEach(btn=>{
++          const active=String(btn.dataset.quickStatusEditTab||'')===nextTab;
++          btn.classList.toggle('active',active);
++          btn.setAttribute('aria-selected',active?'true':'false');
++        });
++        editor.querySelectorAll('[data-quick-status-edit-pane]').forEach(pane=>{
++          pane.hidden=String(pane.dataset.quickStatusEditPane||'')!==nextTab;
++        });
++      }
+       return;
+     }
+ 
+@@ -27182,9 +27195,9 @@
+   document.getElementById('profileV201UnlockOverlay')?.remove();
+   const overlay=document.createElement('div');
+   overlay.id='profileV201UnlockOverlay';
+-  overlay.className='profile-unlock-overlay';
++  overlay.className='profile-unlock-overlay profile-unlock-nonblocking';
+   overlay.innerHTML=`
+-    <section class="profile-unlock-dialog" role="dialog" aria-modal="true" aria-labelledby="profileUnlockTitle">
++    <section class="profile-unlock-dialog" role="status" aria-live="polite" aria-labelledby="profileUnlockTitle">
+       <div class="profile-unlock-spark">NEW!</div>
+       <h2 id="profileUnlockTitle">二つ名パーツ獲得！</h2>
+       <p>新しく使える二つ名が増えました。</p>
+@@ -27201,6 +27214,7 @@
+     </section>`;
+   document.body.appendChild(overlay);
+   requestAnimationFrame(()=>overlay.classList.add('show'));
++  setTimeout(()=>{if(document.getElementById('profileV201UnlockOverlay')===overlay)profileV201CloseUnlockNotice();},12000);
+   try{toast(`二つ名パーツを${parts.length}個獲得しました！`);}catch(error){}
+ }
+ function profileV201CloseUnlockNotice(){
+@@ -27652,7 +27666,10 @@
+     let profileSyncPromise=null;
+     let profileSyncQueuedForce=false;
+     let refreshTimer=0;
++    // RC1.4.544: 一覧受信(catalogBusy)と保存処理(busy)を分離。
++    // 一覧を受信中でも競技作成・記録投稿を開始できる。
+     let busy=false;
++    let catalogBusy=false;
+     let miteRecoImeComposing=false;
+     let miteRecoRenderQueued=false;
+     let backgroundMutationCount=0;
+@@ -28985,7 +29002,7 @@
+          file:// でもJSONP取得は可能。ここでローカルキャッシュだけを返すと、
+          新HTMLで approvalMode 等が既定値へ戻って見えるため共有DBを正として取得する。 */
+       if(window.__miteRecoTimerActiveV1&&!options.force)return false;
+-      if(busy&&!options.force)return false;
++      if(catalogBusy&&!options.force)return false;
+       const endpoint=getEndpoint();
+       if(!endpoint){
+         if(options.manual){
+@@ -29003,7 +29020,7 @@
+         competitions:(data.competitions||[]).slice(),
+         records:(data.records||[]).map(row=>({...row}))
+       };
+-      busy=true;
++      catalogBusy=true;
+       try{
+         let result=null;
+         let split=false;
+@@ -29250,7 +29267,7 @@
+         }
+         return false;
+       }finally{
+-        busy=false;
++        catalogBusy=false;
+       }
+     }
+ 
+@@ -29741,7 +29758,7 @@
+       return profileSyncPromise;
+     }
+     window.fujiyaMiteRecoSyncProfile=options=>syncProfileIfChanged(options||{});
+-    window.fujiyaMiteRecoCommunicationState=()=>({busy,backgroundMutationCount,profileSyncActive:!!profileSyncPromise});
++    window.fujiyaMiteRecoCommunicationState=()=>({busy,catalogBusy,backgroundMutationCount,profileSyncActive:!!profileSyncPromise});
+     function competitionFormHtml(){
+       const comp=data.competitions.find(item=>item.id===editingCompetitionId&&isMine(item))||null;const type=comp?.type||'time';const unit=comp?.unit||'';
+       const autoPlatformTag=miteRecoPlatformTag(comp?.platform||'');
+@@ -30639,7 +30656,7 @@
+       }
+       miteRecoRenderQueued=false;
+       const draft=captureMiteRecoDraft();const profile=getProfile(),counts=summaryCounts();
+-      root.innerHTML=`<div class="mitereco-shell"><div class="mitereco-hero"><div class="mitereco-title-card"><div class="mitereco-kicker">SHARED GAME RECORDS</div><h2>みてレコ</h2><p>共有競技に参加して、みんなの自己ベストでランキングを競います。</p><div class="mitereco-summary"><div><b>${counts.competitions}</b><small>共有競技</small></div><div><b>${counts.players}</b><small>参加選手</small></div><div><b>${counts.records}</b><small>挑戦記録</small></div></div></div><div class="mitereco-athlete-card"><div class="mitereco-athlete-head">${avatarHtml(profile)}<div class="mitereco-athlete-info"><small>PLAYER</small><strong>${esc(profile.name)}</strong><span>${esc(profile.nickname)}</span></div></div><div class="mitereco-athlete-actions"><button type="button" class="ghost" data-mitereco-player-profile="${esc(getIdentity().userId)}" data-mitereco-player-name="${esc(profile.name)}" data-mitereco-player-nickname="${esc(profile.nickname)}" data-mitereco-player-avatar="${esc(profile.imageData||'')}">プロフィール</button>${notificationButtonHtml()}<button type="button" class="ghost" data-mitereco-refresh ${busy?'disabled':''}>共有更新</button></div></div></div>
++      root.innerHTML=`<div class="mitereco-shell"><div class="mitereco-hero"><div class="mitereco-title-card"><div class="mitereco-kicker">SHARED GAME RECORDS</div><h2>みてレコ</h2><p>共有競技に参加して、みんなの自己ベストでランキングを競います。</p><div class="mitereco-summary"><div><b>${counts.competitions}</b><small>共有競技</small></div><div><b>${counts.players}</b><small>参加選手</small></div><div><b>${counts.records}</b><small>挑戦記録</small></div></div></div><div class="mitereco-athlete-card"><div class="mitereco-athlete-head">${avatarHtml(profile)}<div class="mitereco-athlete-info"><small>PLAYER</small><strong>${esc(profile.name)}</strong><span>${esc(profile.nickname)}</span></div></div><div class="mitereco-athlete-actions"><button type="button" class="ghost" data-mitereco-player-profile="${esc(getIdentity().userId)}" data-mitereco-player-name="${esc(profile.name)}" data-mitereco-player-nickname="${esc(profile.nickname)}" data-mitereco-player-avatar="${esc(profile.imageData||'')}">プロフィール</button>${notificationButtonHtml()}<button type="button" class="ghost" data-mitereco-refresh ${(busy||catalogBusy)?'disabled':''}>共有更新</button></div></div></div>
+       <div class="mitereco-layout mitereco-list-only-layout">${competitionBrowserHtml()}</div>${myCompetitionDashboardHtml()}<div class="mitereco-save-status ${esc(lastStatusKind)}" id="miteRecoSaveStatus">${esc(lastStatus)}</div></div>`;
+       restoreMiteRecoDraft(draft);
+       renderCompetitionDetailModal();
+@@ -30911,7 +30928,7 @@
+       const localMatches=linkedCompetitionSummaries(target);
+       const fetchedAt=Date.parse(String(data.fetchedAt||''));
+       const stale=!Number.isFinite(fetchedAt)||(Date.now()-fetchedAt>REFRESH_INTERVAL);
+-      if(stale&&getEndpoint()&&!busy){
++      if(stale&&getEndpoint()&&!catalogBusy){
+         const refresh=fetchCatalog({force:true}).catch(error=>console.warn('みけナビのみてレコ更新失敗',error));
+         if(!localMatches.length){
+           await Promise.race([refresh,new Promise(resolve=>setTimeout(resolve,2800))]);
+@@ -30995,7 +31012,7 @@
+       setTimeout(seed,120);
+       return true;
+     }
+-    function init(){ensurePanel();ensureNavigation();migrateLegacy();purgeLegacyMiteRecoDemo();saveCache();try{if(typeof UI_TAB_LABELS!=='undefined')UI_TAB_LABELS[TAB_ID]='みてレコ';if(typeof UI_TAB_NOTES!=='undefined')UI_TAB_NOTES[TAB_ID]='みんなの共有競技へ参加し、自己ベストランキングを確認する画面です。';}catch(error){}bindEvents();observeProfile();render();new MutationObserver(()=>{const isActive=active();updateNavigation(isActive);if(isActive){syncMiteRecoLayout();render();fetchCatalog().then(ok=>{if(ok&&!window.__MITEKORE_LOCAL_PREVIEW__)scheduleProfileSync(false,250);});}else{document.getElementById('miteRecoPanel')?.style.setProperty('display','none','important');const modal=document.getElementById('miteRecoImageModal');if(modal)modal.hidden=true;const profileModal=document.getElementById('miteRecoPlayerProfileModal');if(profileModal)profileModal.hidden=true;competitionDetailModalOpen=false;const detailModal=document.getElementById('miteRecoCompetitionDetailModal');if(detailModal)detailModal.hidden=true;document.body.style.removeProperty('overflow');document.body.style.removeProperty('overflow-y');document.documentElement.style.removeProperty('overflow');document.documentElement.style.removeProperty('overflow-y');}}).observe(document.body,{attributes:true,attributeFilter:['data-active-tab']});refreshTimer=window.setInterval(()=>{if(active()&&!busy&&!window.__miteRecoTimerActiveV1)fetchCatalog();},REFRESH_INTERVAL);setTimeout(()=>{if(active()&&!document.hidden&&!window.__MITEKORE_LOCAL_PREVIEW__)scheduleProfileSync(false,250);},12000);setTimeout(()=>{try{const key=typeof UI_TAB_KEY!=='undefined'?UI_TAB_KEY:'fujiya_ui_active_tab_v1';if(localStorage.getItem(key)===TAB_ID)openTab();}catch(error){}},0);}
++    function init(){ensurePanel();ensureNavigation();migrateLegacy();purgeLegacyMiteRecoDemo();saveCache();try{if(typeof UI_TAB_LABELS!=='undefined')UI_TAB_LABELS[TAB_ID]='みてレコ';if(typeof UI_TAB_NOTES!=='undefined')UI_TAB_NOTES[TAB_ID]='みんなの共有競技へ参加し、自己ベストランキングを確認する画面です。';}catch(error){}bindEvents();observeProfile();render();new MutationObserver(()=>{const isActive=active();updateNavigation(isActive);if(isActive){syncMiteRecoLayout();render();fetchCatalog().then(ok=>{if(ok&&!window.__MITEKORE_LOCAL_PREVIEW__)scheduleProfileSync(false,250);});}else{document.getElementById('miteRecoPanel')?.style.setProperty('display','none','important');const modal=document.getElementById('miteRecoImageModal');if(modal)modal.hidden=true;const profileModal=document.getElementById('miteRecoPlayerProfileModal');if(profileModal)profileModal.hidden=true;competitionDetailModalOpen=false;const detailModal=document.getElementById('miteRecoCompetitionDetailModal');if(detailModal)detailModal.hidden=true;document.body.style.removeProperty('overflow');document.body.style.removeProperty('overflow-y');document.documentElement.style.removeProperty('overflow');document.documentElement.style.removeProperty('overflow-y');}}).observe(document.body,{attributes:true,attributeFilter:['data-active-tab']});refreshTimer=window.setInterval(()=>{if(active()&&!catalogBusy&&!window.__miteRecoTimerActiveV1)fetchCatalog();},REFRESH_INTERVAL);setTimeout(()=>{if(active()&&!document.hidden&&!window.__MITEKORE_LOCAL_PREVIEW__)scheduleProfileSync(false,250);},12000);setTimeout(()=>{try{const key=typeof UI_TAB_KEY!=='undefined'?UI_TAB_KEY:'fujiya_ui_active_tab_v1';if(localStorage.getItem(key)===TAB_ID)openTab();}catch(error){}},0);}
+     window.miteRecoOpenTab=openTab;
+     window.miteRecoRefreshCatalog=options=>fetchCatalog({suppressTopLoss:true,...(options||{}),force:true,manual:true,awaitFresh:true});
+     window.miteRecoRefreshUi=()=>{ensurePanel();ensureNavigation();render();if(active())fetchCatalog();};
