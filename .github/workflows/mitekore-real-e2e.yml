@@ -50,6 +50,23 @@ jobs:
           fs.writeFileSync(p,s);
           NODE
           node --check mitekore-e2e-test.js
+      - name: Extend test with delete and same-image readd
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const p='mitekore-e2e-test.js';
+          let s=fs.readFileSync(p,'utf8');
+          const anchor="  await phone.screenshot({path:'04-phone-after-sync.png',fullPage:false});pcState=await stateInfo(pc);";
+          const ext=`\n  if(!phonePhoto.exists)throw new Error('初回画像同期が未完了');\n\n  // 実UIで画像を削除し、スマホ側からも消えることを確認。\n  await clickWithUnlock(pc,pc.locator('[data-ui-tab=\"list\"]:visible').first(),'削除前一覧');await sleep(700);\n  await clickWithUnlock(pc,pc.locator(\`button[data-action=\"edit\"][data-id=\"\${fire.id}\"]\`).first(),'削除前編集');await sleep(400);\n  const clear=pc.locator('#clearPhotoBtn');if(!await clear.count())throw new Error('画像を外すボタンなし');\n  await clear.click();await pc.locator('#saveBtn').click();await sleep(5000);\n  const deleteCaptured=await capturePhotos(pc);\n  if(!deleteCaptured.some(r=>r.kind==='entry_photo_state_v2'&&r.itemId===fire.id&&r.state==='deleted'))throw new Error('明示削除stateが作られていない '+JSON.stringify(deleteCaptured));\n  await sleep(20000);await phone.reload({waitUntil:'domcontentloaded',timeout:60000});await sleep(14000);await dismiss(phone);\n  const mtDel=phone.locator('[data-mobile-tab=\"list\"]:visible').first();if(await mtDel.count()){await mtDel.click();await sleep(700)}\n  let phoneStateAfterDelete=await stateInfo(phone);const phoneFireAfterDelete=phoneStateAfterDelete.entries.find(e=>e.id===fire.id)||phoneStateAfterDelete.entries.find(e=>e.title===fire.title);\n  const deletePhonePhoto=phoneFireAfterDelete?await idbPhoto(phone,phoneFireAfterDelete.id):{exists:false,error:'entry missing'};\n  await phone.screenshot({path:'05-phone-after-delete.png',fullPage:false});\n  if(deletePhonePhoto.exists)throw new Error('画像削除がスマホへ反映されていない '+JSON.stringify(deletePhonePhoto));\n\n  // 削除したのと全く同じ画像をPCで再追加。古い削除時刻に負けず復活することを確認。\n  await clickWithUnlock(pc,pc.locator('[data-ui-tab=\"list\"]:visible').first(),'再追加前一覧');await sleep(700);\n  await clickWithUnlock(pc,pc.locator(\`button[data-action=\"edit\"][data-id=\"\${fire.id}\"]\`).first(),'再追加前編集');await sleep(400);\n  await pc.locator('#photo').setInputFiles({name:'sync-test.png',mimeType:'image/png',buffer:png});\n  await pc.waitForFunction(()=>{const x=document.querySelector('#photoPreview');return x&&String(x.src).startsWith('data:image/')},undefined,{timeout:20000});\n  await pc.locator('#saveBtn').click();await sleep(5000);\n  const readdCaptured=await capturePhotos(pc);\n  if(!readdCaptured.some(r=>r.kind==='entry_photo_state_v2'&&r.itemId===fire.id&&r.state==='set'))throw new Error('再追加set stateが作られていない');\n  await clickWithUnlock(pc,pc.locator('[data-ui-tab=\"list\"]:visible').first(),'再追加後一覧');await sleep(800);\n  await pc.screenshot({path:'06-pc-after-readd.png',fullPage:false});\n  await sleep(20000);await phone.reload({waitUntil:'domcontentloaded',timeout:60000});await sleep(14000);await dismiss(phone);\n  const mtRe=phone.locator('[data-mobile-tab=\"list\"]:visible').first();if(await mtRe.count()){await mtRe.click();await sleep(700)}\n  let phoneStateAfterReadd=await stateInfo(phone);const phoneFireAfterReadd=phoneStateAfterReadd.entries.find(e=>e.id===fire.id)||phoneStateAfterReadd.entries.find(e=>e.title===fire.title);\n  const readdPhonePhoto=phoneFireAfterReadd?await idbPhoto(phone,phoneFireAfterReadd.id):{exists:false,error:'entry missing'};\n  await phone.screenshot({path:'07-phone-after-readd.png',fullPage:false});\n  if(!readdPhonePhoto.exists)throw new Error('同一画像の再追加がスマホへ復活していない '+JSON.stringify(readdPhonePhoto));\n  phoneState=phoneStateAfterReadd;pcState=await stateInfo(pc);\n`;
+          if(!s.includes(anchor))throw new Error('extension anchor not found');
+          s=s.replace(anchor,anchor+ext);
+          const resultFrom="const result={version,ownerUserId,fireId:fire.id,mugenId:mugen.id,pairUrlGenerated:!!pairUrl,pcPhoto,phonePhoto,captured,";
+          const resultTo="const result={version,ownerUserId,fireId:fire.id,mugenId:mugen.id,pairUrlGenerated:!!pairUrl,pcPhoto,phonePhoto,captured,deletePhonePhoto,readdPhonePhoto,deleteCaptured,readdCaptured,";
+          if(!s.includes(resultFrom))throw new Error('result anchor not found');
+          s=s.replace(resultFrom,resultTo);
+          fs.writeFileSync(p,s);
+          NODE
+          node --check mitekore-e2e-test.js
       - name: Run candidate against real GAS
         run: node mitekore-e2e-test.js
       - name: Upload evidence
@@ -62,6 +79,9 @@ jobs:
             02-phone-paired.png
             03-pc-photo-saved.png
             04-phone-after-sync.png
+            05-phone-after-delete.png
+            06-pc-after-readd.png
+            07-phone-after-readd.png
             pair-failure.png
             pair-failure.json
             result.json
