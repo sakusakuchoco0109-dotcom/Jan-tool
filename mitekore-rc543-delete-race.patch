@@ -28,8 +28,6 @@
 -      const map=new Map((Array.isArray(rows)?rows:[]).map(row=>[String(row?.id||''),String(row?.data||'')]).filter(([id,data])=>id&&data));
 -      (state.entries||[]).forEach(entry=>{const id=String(entry?.id||'');const data=String(entry?.photoData||'');if(id&&data)map.set(id,data);});
 +      // RC1.4.543: 明示削除済みIDは、削除前に開始していた古いIndexedDB読込結果で復活させない。
-+      // 正常な画像追加・受信では set 側が先に clearEntryPhotoDeleted() するため、ここで削除印を
-+      // 自動解除する必要はない。削除印が残っている間は stale な画像を同期候補から除外する。
 +      const deleted=entryPhotoDeleteMap();
 +      const isDeleted=id=>Object.prototype.hasOwnProperty.call(deleted,String(id||''));
 +      const map=new Map((Array.isArray(rows)?rows:[])
@@ -48,43 +46,25 @@
        entryPhotosReady=true;
      }catch(error){console.warn('登録画像同期キャッシュ準備失敗',error);}
    }
-@@ -33160,31 +33160,37 @@
-     // manifestは案内用。完全に復元できたchunkはmanifestに無くても受け取る。
-     // RC1.4.540で「空index + 写真chunk」になった既存クラウドもここで自動修復できる。
-     const currentRows=typeof entryPhotoGetAllRecords==='function'?await entryPhotoGetAllRecords():[];
+@@ -33147,2 +33147,4 @@
      const finalMap=new Map((Array.isArray(currentRows)?currentRows:[]).map(row=>[String(row?.id||''),String(row?.data||'')]).filter(([id,data])=>id&&data));
 +    const localDeleteRows=entryPhotoDeleteMap();
 +    const preservedLocalDeletes=new Set();
      const candidateIds=new Set([...manifestIds,...incoming.keys(),...states.keys(),...legacyDeleted]);
-     candidateIds.forEach(id=>{
-       const data=String(incoming.get(id)||'');
-       const stateRow=states.get(id)||null;
-       const stateValue=String(stateRow?.data?.state||'');
-       const stateTime=pairRecordTime(stateRow);
+@@ -33155,2 +33157,5 @@
        const chunkTime=incomingTimes.get(id)||0;
 -      const explicitDeleted=legacyDeleted.has(id)||(stateValue==='deleted'&&stateTime>=chunkTime);
 +      const localDeleteTime=Date.parse(String(localDeleteRows[id]||''))||0;
 +      const incomingTime=Math.max(stateTime,chunkTime);
 +      const localDeleteNewer=localDeleteTime>0&&localDeleteTime>incomingTime;
 +      const explicitDeleted=localDeleteNewer||legacyDeleted.has(id)||(stateValue==='deleted'&&stateTime>=chunkTime);
-       if(explicitDeleted){
+@@ -33158,3 +33163,4 @@
          finalMap.delete(id);
 -        markEntryPhotoDeleted(id,String(stateRow?.updatedAt||now()));
 +        if(localDeleteNewer){preservedLocalDeletes.add(id);markEntryPhotoDeleted(id,String(localDeleteRows[id]||now()));}
 +        else markEntryPhotoDeleted(id,String(stateRow?.updatedAt||now()));
          return;
-       }
-       if(data){
-         finalMap.set(id,data);
-         clearEntryPhotoDeleted(id);
-         const receivedMs=Math.max(chunkTime,stateValue==='set'?stateTime:0);
-         if(receivedMs>0)setEntryPhotoUpdatedAt(id,new Date(receivedMs).toISOString());
-       }
-     });
-     const validEntryIds=new Set((state.entries||[]).map(entry=>String(entry?.id||'')).filter(Boolean));
-     [...finalMap.keys()].forEach(id=>{if(!validEntryIds.has(id)&&legacyDeleted.has(id))finalMap.delete(id);});
-     const records=[...finalMap.entries()].map(([id,data])=>({id,data}));
-     if(typeof extendedIdbReplaceAll==='function')await extendedIdbReplaceAll('fujiya_collection_entry_photos_v1','photos',records);
+@@ -33174,3 +33180,3 @@
      entryPhotoMap=finalMap;entryPhotosReady=true;
 -    const deletedIds=new Set([...legacyDeleted,...[...states.entries()].filter(([_id,row])=>String(row?.data?.state||'')==='deleted').map(([id])=>id)]);
 +    const deletedIds=new Set([...legacyDeleted,...preservedLocalDeletes,...[...states.entries()].filter(([_id,row])=>String(row?.data?.state||'')==='deleted').map(([id])=>id)]);
