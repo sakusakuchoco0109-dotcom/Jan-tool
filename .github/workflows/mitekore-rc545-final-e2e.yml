@@ -1,0 +1,114 @@
+name: MiteKore RC545 Final E2E
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-rc545-final-e2e.yml'
+      - 'rc545/*.gz.b64*'
+      - 'rc545/*.js'
+      - 'mitekore-rc544-index.patch'
+      - 'mitekore-rc544-core.patch'
+      - 'mitekore-rc544-label.patch'
+  workflow_dispatch:
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 20}
+      - name: Rebuild exact tested RC544 base
+        run: |
+          set -euxo pipefail
+          APP='https://hilarious-haupia-6e0406.netlify.app/'
+          mkdir -p candidate/assets
+          curl -fsSL "$APP" -o candidate/index.html
+          curl -fsSL "${APP}mitekore-version.js" -o candidate/mitekore-version.js || true
+          python3 - <<'PY'
+          import re,urllib.request,pathlib
+          app='https://hilarious-haupia-6e0406.netlify.app/'; root=pathlib.Path('candidate'); html=(root/'index.html').read_text()
+          paths=set(re.findall(r'(?:src|href)=["\'](assets/[^"\'?]+)',html)); paths.update({'assets/base.css','assets/release-theme.css','assets/font-large.css','assets/font-xlarge.css','assets/mitekore-logo.webp','assets/sticker-image_data.webp','assets/sticker-qr_data.png'})
+          for rel in sorted(paths):
+              dst=root/rel; dst.parent.mkdir(parents=True,exist_ok=True)
+              try:
+                  with urllib.request.urlopen(app+rel,timeout=30) as r: dst.write_bytes(r.read())
+              except Exception:
+                  if 'app-core-' in rel: raise
+          core=next(p for p in paths if re.fullmatch(r'assets/app-core-\d+\.js',p)); (root/'assets/app-core-544.js').write_bytes((root/core).read_bytes())
+          html=re.sub(r'<title>みてコレ！ V20\.2\.35ex RC1\.4\.\d+ 配布版</title>','<title>みてコレ！ V20.2.35ex RC1.4.542 配布版</title>',html,count=1); html=re.sub(r'assets/app-core-\d+\.js','assets/app-core-542.js',html); (root/'index.html').write_text(html)
+          PY
+          patch --fuzz=3 candidate/index.html < mitekore-rc544-index.patch
+          patch --fuzz=3 candidate/index.html < mitekore-rc544-label.patch
+          patch --fuzz=3 candidate/assets/app-core-544.js < mitekore-rc544-core.patch
+          python3 - <<'PY'
+          import re,pathlib
+          c=pathlib.Path('candidate/assets/app-core-544.js'); s=c.read_text(); s=re.sub(r"const APP_VERSION_LABEL = 'V20\.2\.35ex RC1\.4\.\d+';","const APP_VERSION_LABEL = 'V20.2.35ex RC1.4.544';",s,count=1); c.write_text(s)
+          v=pathlib.Path('candidate/mitekore-version.js'); t=v.read_text() if v.exists() and v.stat().st_size else "window.__MITEKORE_PUBLIC_BUILD__={app:'mitekore',version:'20.2.35ex',pairProtocol:6,build:'RC1.4.544',rc:'1.4.544'};"; t=re.sub(r"build:\s*'RC1\.4\.\d+'","build: 'RC1.4.544'",t); t=re.sub(r"rc:\s*'1\.4\.\d+'","rc: '1.4.544'",t); v.write_text(t)
+          for p in pathlib.Path('candidate/assets').glob('app-core-*.js'):
+              if p.name!='app-core-544.js': p.unlink()
+          PY
+          echo 'eca69a13ca1028f0678159044aa7b6399704a5adc616641bb684a577a07b5dc7  candidate/index.html' | sha256sum -c -
+          echo '64c51e435e6d3d346c1dc5aa5e6fbc7ae1fba5d34ea773cce79acbbc1746e670  candidate/assets/app-core-544.js' | sha256sum -c -
+          echo '347c76ab61202bd121dbf3eddd27ab3bebbb1cd2b1055692e91cb82d17694ec6  candidate/mitekore-version.js' | sha256sum -c -
+      - name: Build RC545
+        run: |
+          set -euxo pipefail
+          base64 -d rc545/build-rc545.py.gz.b64 | gzip -d > build-rc545.py
+          base64 -d rc545/rc545-miteho.css.gz.b64 | gzip -d > rc545-miteho.css
+          cat rc545/rc545-miteho.js.gz.b64.a rc545/rc545-miteho.js.gz.b64.b | base64 -d | gzip -d > rc545-miteho.js
+          cp rc545/rc545-e2e.js rc545-e2e.js
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('rc545-e2e.js'); s=p.read_text()
+          old="await p.waitForFunction(()=>{try{return typeof MASTER_TITLES!=='undefined'&&Array.isArray(MASTER_TITLES)&&MASTER_TITLES.length>100;}catch{return false;}},{timeout:60000});"
+          new="await p.waitForFunction(()=>{try{return Number(window.fujiyaMiteMagazineBridge?.getMasterTitles?.().length||0)>100;}catch{return false;}},undefined,{timeout:120000});"
+          assert old in s
+          p.write_text(s.replace(old,new,1))
+          PY
+          echo '6a4bf17f52d16c47df086d03fb9cfe9823222529d61184699e56a6dcbf563c31  rc545-miteho.js' | sha256sum -c -
+          python3 build-rc545.py candidate
+          node --check candidate/assets/app-core-545.js
+          node --check rc545-miteho.js
+          node --check rc545-e2e.js
+          echo 'ec866b3e886df984f07baff747d6f381b68b0374b0336132b1f3f5e6431e7706  candidate/index.html' | sha256sum -c -
+          echo '72eaff1319d541b57610d7622930292a4b2150f9ac6def0800a491bf348c114c  candidate/assets/app-core-545.js' | sha256sum -c -
+          echo '5a6804d376a11bd596e1bfe2cd120cc24f9f76ded2b21b76baf3f65ec43b3078  candidate/mitekore-version.js' | sha256sum -c -
+          cat > candidate/_headers <<'EOF'
+          /index.html
+            Cache-Control: no-cache, max-age=0, must-revalidate
+          /mitekore-version.js
+            Cache-Control: no-store, max-age=0
+          /assets/app-core-545.js
+            Cache-Control: public, max-age=31536000, immutable
+          EOF
+          sha256sum candidate/index.html candidate/assets/app-core-545.js candidate/mitekore-version.js | tee rc545-sha256.txt
+      - name: Prepare browser
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+      - name: Serve candidate
+        run: |
+          python3 -m http.server 8899 --directory candidate > rc545-http.log 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8899/ >/dev/null && exit 0; sleep 1; done
+          exit 1
+      - name: Run real browser and real shared backend checks
+        run: node rc545-e2e.js
+      - name: Package exact tested candidate
+        if: always()
+        run: cd candidate && zip -qr ../mitekore-RC1.4.545-tested.zip .
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-rc545-final-tested
+          path: |
+            rc545-e2e-result.json
+            rc545-*.png
+            rc545-sha256.txt
+            rc545-http.log
+            mitekore-RC1.4.545-tested.zip
+            candidate/index.html
+            candidate/mitekore-version.js
+            candidate/_headers
+            candidate/assets/app-core-545.js
