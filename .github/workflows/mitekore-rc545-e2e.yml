@@ -62,7 +62,7 @@ jobs:
           node --check rc545-miteho.js
           node --check rc545-e2e.js
           echo 'ec259cde763573d4c852781a030ae2ccd762ecdd592ac985b62fcddddbdc2bcf  candidate/index.html' | sha256sum -c -
-          echo '2b5b9b020497236650aa666f2a6740928ca63db992f8ee0884ffd45727151ff3  candidate/assets/app-core-545.js' | sha256sum -c -
+          echo '72eaff1319d541b57610d7622930292a4b2150f9ac6def0800a491bf348c114c  candidate/assets/app-core-545.js' | sha256sum -c -
           echo '5a6804d376a11bd596e1bfe2cd120cc24f9f76ded2b21b76baf3f65ec43b3078  candidate/mitekore-version.js' | sha256sum -c -
           sha256sum candidate/index.html candidate/assets/app-core-545.js candidate/mitekore-version.js | tee rc545-sha256.txt
       - name: Prepare browser
