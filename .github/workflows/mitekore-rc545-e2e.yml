@@ -4,6 +4,7 @@ on:
     paths:
       - '.github/workflows/mitekore-rc545-e2e.yml'
       - 'rc545/*.gz.b64*'
+      - 'rc545/*.js'
       - 'mitekore-rc544-index.patch'
       - 'mitekore-rc544-core.patch'
       - 'mitekore-rc544-label.patch'
@@ -56,7 +57,7 @@ jobs:
           base64 -d rc545/build-rc545.py.gz.b64 | gzip -d > build-rc545.py
           base64 -d rc545/rc545-miteho.css.gz.b64 | gzip -d > rc545-miteho.css
           cat rc545/rc545-miteho.js.gz.b64.a rc545/rc545-miteho.js.gz.b64.b | base64 -d | gzip -d > rc545-miteho.js
-          cat rc545/rc545-e2e.js.gz.b64.a rc545/rc545-e2e.js.gz.b64.b | base64 -d | gzip -d > rc545-e2e.js
+          cp rc545/rc545-e2e.js rc545-e2e.js
           echo '238960649e64f39f2783d8249a6ef161ce2b1f0a7106385c27acdaa70c5ab36b  rc545-miteho.js' | sha256sum -c -
           echo '0ac611ebd36252433d576884761e9ae9b5ca590fb22538209909072b65ea24ca  rc545-e2e.js' | sha256sum -c -
           python3 build-rc545.py candidate
