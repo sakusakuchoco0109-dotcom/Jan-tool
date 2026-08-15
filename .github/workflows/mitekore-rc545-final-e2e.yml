@@ -59,11 +59,18 @@ jobs:
           cp rc545/rc545-e2e.js rc545-e2e.js
           python3 - <<'PY'
           from pathlib import Path
+          p=Path('rc545-miteho.js'); s=p.read_text()
+          old_type="function setType(next){type=['photo','url','game','showcase','mitereco'].includes(next)?next:'photo';document.querySelectorAll('[data-miteho-type]').forEach(b=>b.classList.toggle('is-active',b.dataset.mitehoType===type));document.querySelectorAll('[data-miteho-panel]').forEach(p=>p.hidden=p.dataset.mitehoPanel!==type);if(type==='showcase')renderShowcaseChoice();if(type==='mitereco')renderRecoChoices();}"
+          new_type="function setType(next){type=['photo','url','game','showcase','mitereco'].includes(next)?next:'photo';document.querySelectorAll('[data-miteho-type]').forEach(b=>b.classList.toggle('is-active',b.dataset.mitehoType===type));document.querySelectorAll('[data-miteho-panel]').forEach(p=>p.hidden=p.dataset.mitehoPanel!==type);if(type==='game')ensureGameMaster();if(type==='showcase')renderShowcaseChoice();if(type==='mitereco')renderRecoChoices();}"
+          old_master="function masterGames(){try{return (typeof MASTER_TITLES!=='undefined'&&Array.isArray(MASTER_TITLES))?MASTER_TITLES:[];}catch(e){return [];}}"
+          new_master="function ensureGameMaster(){try{window.fujiyaEnsureTitleMaster?.('miteho',{showOverlay:false});}catch(e){}}\n  function masterGames(){try{const rows=window.fujiyaMiteMagazineBridge?.getMasterTitles?.();return Array.isArray(rows)?rows:[];}catch(e){return [];}}"
+          assert old_type in s and old_master in s
+          p.write_text(s.replace(old_type,new_type,1).replace(old_master,new_master,1))
           p=Path('rc545-e2e.js'); s=p.read_text()
-          old="await p.waitForFunction(()=>{try{return typeof MASTER_TITLES!=='undefined'&&Array.isArray(MASTER_TITLES)&&MASTER_TITLES.length>100;}catch{return false;}},{timeout:60000});"
-          new="await p.waitForFunction(()=>{try{return Number(window.fujiyaMiteMagazineBridge?.getMasterTitles?.().length||0)>100;}catch{return false;}},undefined,{timeout:120000});"
-          assert old in s
-          p.write_text(s.replace(old,new,1))
+          old_wait="await p.waitForFunction(()=>{try{return typeof MASTER_TITLES!=='undefined'&&Array.isArray(MASTER_TITLES)&&MASTER_TITLES.length>100;}catch{return false;}},{timeout:60000});"
+          new_wait="await p.waitForFunction(()=>{try{return Number(window.fujiyaMiteMagazineBridge?.getMasterTitles?.().length||0)>100;}catch{return false;}},undefined,{timeout:120000});"
+          assert old_wait in s
+          p.write_text(s.replace(old_wait,new_wait,1))
           PY
           echo '6a4bf17f52d16c47df086d03fb9cfe9823222529d61184699e56a6dcbf563c31  rc545-miteho.js' | sha256sum -c -
           python3 build-rc545.py candidate
