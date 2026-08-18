@@ -6,6 +6,8 @@ on:
       - '.github/workflows/chatgpt-image-e2e.yml'
       - 'image-e2e/**'
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   e2e:
     runs-on: ubuntu-latest
@@ -51,6 +53,20 @@ jobs:
           python3 build-rc545.py candidate
           node --check candidate/assets/app-core-545.js
           sha256sum candidate/assets/app-core-545.js candidate/index.html > image-e2e-base-sha256.txt
+      - name: Persist exact browser base on branch
+        run: |
+          set -euxo pipefail
+          mkdir -p image-e2e/generated-base
+          if [ ! -f image-e2e/generated-base/app-core-545.js ]; then
+            cp candidate/assets/app-core-545.js image-e2e/generated-base/app-core-545.js
+            cp candidate/index.html image-e2e/generated-base/index.html
+            cp image-e2e-base-sha256.txt image-e2e/generated-base/sha256.txt
+            git config user.name 'ChatGPT E2E Bot'
+            git config user.email 'actions@users.noreply.github.com'
+            git add image-e2e/generated-base
+            git commit -m 'Persist exact RC545 E2E base [skip ci]'
+            git push origin HEAD:chatgpt-mitekore-image-e2e
+          fi
       - name: Upload base for exact f82 patching
         uses: actions/upload-artifact@v4
         with:
