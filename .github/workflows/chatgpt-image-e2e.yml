@@ -1,0 +1,61 @@
+name: ChatGPT MiteKore Image E2E
+on:
+  push:
+    branches: [chatgpt-mitekore-image-e2e]
+    paths:
+      - '.github/workflows/chatgpt-image-e2e.yml'
+      - 'image-e2e/**'
+  workflow_dispatch:
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 20}
+      - name: Rebuild exact RC544 base
+        run: |
+          set -euxo pipefail
+          APP='https://hilarious-haupia-6e0406.netlify.app/'
+          mkdir -p candidate/assets
+          curl -fsSL "$APP" -o candidate/index.html
+          curl -fsSL "${APP}mitekore-version.js" -o candidate/mitekore-version.js || true
+          python3 - <<'PY'
+          import re,urllib.request,pathlib
+          app='https://hilarious-haupia-6e0406.netlify.app/'; root=pathlib.Path('candidate'); html=(root/'index.html').read_text()
+          paths=set(re.findall(r'(?:src|href)=["\'](assets/[^"\'?]+)',html)); paths.update({'assets/base.css','assets/release-theme.css','assets/font-large.css','assets/font-xlarge.css','assets/mitekore-logo.webp','assets/sticker-image_data.webp','assets/sticker-qr_data.png'})
+          for rel in sorted(paths):
+              dst=root/rel; dst.parent.mkdir(parents=True,exist_ok=True)
+              try:
+                  with urllib.request.urlopen(app+rel,timeout=30) as r: dst.write_bytes(r.read())
+              except Exception:
+                  if 'app-core-' in rel: raise
+          core=next(p for p in paths if re.fullmatch(r'assets/app-core-\d+\.js',p)); (root/'assets/app-core-544.js').write_bytes((root/core).read_bytes())
+          html=re.sub(r'<title>みてコレ！ V20\.2\.35ex RC1\.4\.\d+ 配布版</title>','<title>みてコレ！ V20.2.35ex RC1.4.542 配布版</title>',html,count=1); html=re.sub(r'assets/app-core-\d+\.js','assets/app-core-542.js',html); (root/'index.html').write_text(html)
+          PY
+          patch --fuzz=3 candidate/index.html < mitekore-rc544-index.patch
+          patch --fuzz=3 candidate/index.html < mitekore-rc544-label.patch
+          patch --fuzz=3 candidate/assets/app-core-544.js < mitekore-rc544-core.patch
+          python3 - <<'PY'
+          import re,pathlib
+          c=pathlib.Path('candidate/assets/app-core-544.js'); s=c.read_text(); s=re.sub(r"const APP_VERSION_LABEL = 'V20\.2\.35ex RC1\.4\.\d+';","const APP_VERSION_LABEL = 'V20.2.35ex RC1.4.544';",s,count=1); c.write_text(s)
+          v=pathlib.Path('candidate/mitekore-version.js'); t=v.read_text() if v.exists() and v.stat().st_size else "window.__MITEKORE_PUBLIC_BUILD__={app:'mitekore',version:'20.2.35ex',pairProtocol:6,build:'RC1.4.544',rc:'1.4.544'};"; t=re.sub(r"build:\s*'RC1\.4\.\d+'","build: 'RC1.4.544'",t); t=re.sub(r"rc:\s*'1\.4\.\d+'","rc: '1.4.544'",t); v.write_text(t)
+          PY
+      - name: Build RC545 browser base
+        run: |
+          set -euxo pipefail
+          base64 -d rc545/build-rc545.py.gz.b64 | gzip -d > build-rc545.py
+          base64 -d rc545/rc545-miteho.css.gz.b64 | gzip -d > rc545-miteho.css
+          cat rc545/rc545-miteho.js.gz.b64.a rc545/rc545-miteho.js.gz.b64.b | base64 -d | gzip -d > rc545-miteho.js
+          python3 build-rc545.py candidate
+          node --check candidate/assets/app-core-545.js
+          sha256sum candidate/assets/app-core-545.js candidate/index.html > image-e2e-base-sha256.txt
+      - name: Upload base for exact f82 patching
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-image-e2e-base
+          path: |
+            candidate/assets/app-core-545.js
+            candidate/index.html
+            image-e2e-base-sha256.txt
