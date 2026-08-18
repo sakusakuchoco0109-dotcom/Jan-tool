@@ -4,7 +4,7 @@ on:
     branches: [chatgpt-mitekore-image-e2e]
     paths:
       - '.github/workflows/chatgpt-image-e2e.yml'
-      - 'image-e2e/**'
+      - 'image-e2e/net545core-to-f82.patch.xz.b64'
   workflow_dispatch:
 permissions:
   contents: write
@@ -52,26 +52,33 @@ jobs:
           cat rc545/rc545-miteho.js.gz.b64.a rc545/rc545-miteho.js.gz.b64.b | base64 -d | gzip -d > rc545-miteho.js
           python3 build-rc545.py candidate
           node --check candidate/assets/app-core-545.js
-          sha256sum candidate/assets/app-core-545.js candidate/index.html > image-e2e-base-sha256.txt
-      - name: Persist exact browser base on branch
+      - name: Apply current f82 core patch
+        id: patch
+        continue-on-error: true
+        run: |
+          set +e
+          base64 -d image-e2e/net545core-to-f82.patch.xz.b64 | xz -d > image-e2e/f82.patch
+          patch --batch --fuzz=3 candidate/assets/app-core-545.js < image-e2e/f82.patch > image-e2e/patch.log 2>&1
+          RC=$?
+          node --check candidate/assets/app-core-545.js >> image-e2e/patch.log 2>&1
+          NODE_RC=$?
+          SHA=$(sha256sum candidate/assets/app-core-545.js | awk '{print $1}')
+          printf 'patch_rc=%s\nnode_rc=%s\nsha256=%s\nexpected_f82_sha256=869887d0c3bc2a971f119f9896674e6c0da2d99324e80e1cafe4dc6f914bf70d\n' "$RC" "$NODE_RC" "$SHA" > image-e2e/patch-status.txt
+          exit $(( RC || NODE_RC ))
+      - name: Persist patch status
+        if: always()
         run: |
           set -euxo pipefail
-          mkdir -p image-e2e/generated-base
-          if [ ! -f image-e2e/generated-base/app-core-545.js ]; then
-            cp candidate/assets/app-core-545.js image-e2e/generated-base/app-core-545.js
-            cp candidate/index.html image-e2e/generated-base/index.html
-            cp image-e2e-base-sha256.txt image-e2e/generated-base/sha256.txt
-            git config user.name 'ChatGPT E2E Bot'
-            git config user.email 'actions@users.noreply.github.com'
-            git add image-e2e/generated-base
-            git commit -m 'Persist exact RC545 E2E base [skip ci]'
+          mkdir -p image-e2e/status
+          cp image-e2e/patch-status.txt image-e2e/status/latest.txt || true
+          cp image-e2e/patch.log image-e2e/status/patch.log || true
+          git config user.name 'ChatGPT E2E Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add image-e2e/status
+          if ! git diff --cached --quiet; then
+            git commit -m 'Record f82 patch status [skip ci]'
             git push origin HEAD:chatgpt-mitekore-image-e2e
           fi
-      - name: Upload base for exact f82 patching
-        uses: actions/upload-artifact@v4
-        with:
-          name: chatgpt-image-e2e-base
-          path: |
-            candidate/assets/app-core-545.js
-            candidate/index.html
-            image-e2e-base-sha256.txt
+      - name: Require exact f82 core
+        run: |
+          test "$(sha256sum candidate/assets/app-core-545.js | awk '{print $1}')" = '869887d0c3bc2a971f119f9896674e6c0da2d99324e80e1cafe4dc6f914bf70d'
