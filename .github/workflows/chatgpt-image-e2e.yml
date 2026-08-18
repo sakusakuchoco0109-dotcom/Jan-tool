@@ -4,7 +4,7 @@ on:
     branches: [chatgpt-mitekore-image-e2e]
     paths:
       - '.github/workflows/chatgpt-image-e2e.yml'
-      - 'image-e2e/net545core-to-f82.patch.xz.b64'
+      - 'image-e2e/patchparts/**'
   workflow_dispatch:
 permissions:
   contents: write
@@ -57,14 +57,15 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          base64 -d image-e2e/net545core-to-f82.patch.xz.b64 | xz -d > image-e2e/f82.patch
+          cat image-e2e/patchparts/00.b64 image-e2e/patchparts/01.b64 image-e2e/patchparts/02.b64 image-e2e/patchparts/03.b64 | base64 -d | xz -d > image-e2e/f82.patch
+          DECODE_RC=$?
           patch --batch --fuzz=3 candidate/assets/app-core-545.js < image-e2e/f82.patch > image-e2e/patch.log 2>&1
           RC=$?
           node --check candidate/assets/app-core-545.js >> image-e2e/patch.log 2>&1
           NODE_RC=$?
           SHA=$(sha256sum candidate/assets/app-core-545.js | awk '{print $1}')
-          printf 'patch_rc=%s\nnode_rc=%s\nsha256=%s\nexpected_f82_sha256=869887d0c3bc2a971f119f9896674e6c0da2d99324e80e1cafe4dc6f914bf70d\n' "$RC" "$NODE_RC" "$SHA" > image-e2e/patch-status.txt
-          exit $(( RC || NODE_RC ))
+          printf 'decode_rc=%s\npatch_rc=%s\nnode_rc=%s\nsha256=%s\nexpected_f82_sha256=869887d0c3bc2a971f119f9896674e6c0da2d99324e80e1cafe4dc6f914bf70d\n' "$DECODE_RC" "$RC" "$NODE_RC" "$SHA" > image-e2e/patch-status.txt
+          exit $(( DECODE_RC || RC || NODE_RC ))
       - name: Persist patch status
         if: always()
         run: |
@@ -76,7 +77,7 @@ jobs:
           git config user.email 'actions@users.noreply.github.com'
           git add image-e2e/status
           if ! git diff --cached --quiet; then
-            git commit -m 'Record f82 patch status [skip ci]'
+            git commit -m 'Record complete f82 patch status [skip ci]'
             git push origin HEAD:chatgpt-mitekore-image-e2e
           fi
       - name: Require exact f82 core
