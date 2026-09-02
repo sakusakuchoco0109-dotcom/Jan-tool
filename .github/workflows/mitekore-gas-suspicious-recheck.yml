@@ -1,0 +1,71 @@
+name: MiteKore GAS Suspicious Recheck
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-gas-suspicious-recheck.yml'
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Recheck suspicious routes
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import subprocess, urllib.parse, json, time, statistics, re
+          GAS='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+          APP='20.2.35.652'
+          ts=str(int(time.time()*1000))
+          uid='github_recheck_'+ts
+          sync='mk_recheck_'+ts
+          rows=[]
+          def call(label,action,params=None,method='GET',timeout=180):
+              params=dict(params or {}); params['action']=action; params['_']=str(int(time.time()*1000))
+              out='/tmp/'+re.sub(r'[^A-Za-z0-9_-]','_',label)+'.out'
+              if method=='GET':
+                  url=GAS+'?'+urllib.parse.urlencode(params)
+                  cmd=['curl','-L','--max-time',str(timeout),'-sS','-o',out,'-w','%{http_code}|%{time_total}|%{time_starttransfer}|%{size_download}',url]
+              else:
+                  params.setdefault('requestId','recheck_'+label+'_'+ts)
+                  params.setdefault('appVersion',APP)
+                  cmd=['curl','-L','--max-time',str(timeout),'-sS','-o',out,'-w','%{http_code}|%{time_total}|%{time_starttransfer}|%{size_download}']
+                  for k,v in params.items(): cmd += ['--data-urlencode',f'{k}={v}']
+                  cmd.append(GAS)
+              try: m=subprocess.check_output(cmd,text=True,stderr=subprocess.STDOUT).strip()
+              except subprocess.CalledProcessError: m='ERR|0|0|0'
+              p=m.split('|'); sec=float(p[1]) if len(p)>1 and p[1] else 0
+              try: body=open(out,encoding='utf-8',errors='ignore').read()
+              except: body=''
+              row={'label':label,'action':action,'method':method,'http':p[0] if p else 'ERR','seconds':sec,'ttfb':float(p[2] or 0) if len(p)>2 else 0,'bytes':int(float(p[3] or 0)) if len(p)>3 else 0,'preview':re.sub(r'\s+',' ',body)[:180]}
+              rows.append(row); print('RECHECK|'+label+'|'+action+'|'+row['http']+f'|{sec:.3f}|'+row['preview'],flush=True)
+              return row
+          tests=[
+            ('title_summary','title_summary',{'platform':'FC','title':'スーパーマリオブラザーズ','canonicalTitle':'スーパーマリオブラザーズ'},'GET',180,5),
+            ('pt_coupon_user_state','pt_coupon_user_state',{'userId':uid},'GET',180,4),
+            ('device_sync_pull_empty','device_sync_pull',{'syncKey':sync,'clientVersion':'3','userId':uid,'appVersion':APP},'GET',180,4),
+            ('daily_topic_results','daily_topic_results',{},'GET',180,3),
+            ('title_summary_frame','title_summary_frame',{'platform':'FC','title':'スーパーマリオブラザーズ','canonicalTitle':'スーパーマリオブラザーズ'},'POST',180,3),
+            ('magazine_youtube_preview','magazine_youtube_preview',{'url':'https://www.youtube.com/watch?v=dQw4w9WgXcQ'},'GET',180,3),
+            ('magazine_rss_feed','magazine_rss_feed',{'feedUrl':'https://hnrss.org/frontpage','limit':'5','force':'1'},'GET',180,3),
+            ('magazine_rss_item','magazine_rss_item',{'feedUrl':'https://hnrss.org/frontpage','itemUrl':'https://example.com/not-in-feed','force':'1'},'GET',180,3),
+            ('buyback_mail_status','buyback_mail_status',{'submissionId':'missing_'+ts},'GET',120,3),
+            ('account_delete_status_missing','account_delete_status',{'requestId':'missing_'+ts},'GET',120,3),
+            ('user_alias_status_missing','user_alias_status',{'requestId':'missing_'+ts},'GET',120,3),
+          ]
+          summary=[]
+          for name,action,params,method,timeout,n in tests:
+              vals=[];https=[]
+              for i in range(n):
+                  r=call(f'{name}_{i+1}',action,params,method,timeout); vals.append(r['seconds']); https.append(r['http']); time.sleep(.5)
+              summary.append({'name':name,'action':action,'samples':vals,'median':statistics.median(vals),'min':min(vals),'max':max(vals),'http':https})
+              print(f'SUMMARY|{name}|median={statistics.median(vals):.3f}|min={min(vals):.3f}|max={max(vals):.3f}|http={https}',flush=True)
+          with open('mitekore-gas-suspicious-recheck.json','w',encoding='utf-8') as f: json.dump({'rows':rows,'summary':summary},f,ensure_ascii=False,indent=2)
+          PY
+      - name: Upload benchmark
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-gas-suspicious-recheck
+          path: mitekore-gas-suspicious-recheck.json
