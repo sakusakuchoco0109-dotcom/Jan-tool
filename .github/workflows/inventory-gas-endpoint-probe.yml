@@ -1,0 +1,55 @@
+name: Fujiya Inventory GAS Endpoint Probe
+on:
+  push:
+    paths:
+      - '.github/workflows/inventory-gas-endpoint-probe.yml'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Probe candidate GAS endpoints
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import subprocess, json, urllib.parse, time
+          urls=[
+          'https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec',
+          'https://script.google.com/macros/s/AKfycbyWM5vRqBPX2MTFP8PGhcbkDDatMwipOXP_GFwjpvMvnvxgj_dvx0spMvij9qOTWQ/exec',
+          'https://script.google.com/macros/s/AKfycbxaMkHH82zvUrbD6ApFaRGc2BYwagveP6tdtPigEBla1C0cIXXmOz38wdBpu5KGegE/exec',
+          'https://script.google.com/macros/s/AKfycbxC3TQmcdMfwiRskwUrTQSzhpZusvKsLqlM52Q98Bnk8ulB0ENtSjj5qmlYKX7ah6Wq/exec',
+          'https://script.google.com/macros/s/AKfycbyAbEirQPhHhEfD4vKvO3SCu8yc4GPRhcHk7-DTrivc1CcnoxOsPqVoIRDjW3JBqlo/exec',
+          'https://script.google.com/macros/s/AKfycbySkKuATSg__A88UuyWvzMOLoBZgTJRsQgPzkfLd0xXYaXcz1J21u1A3_izwyeJEwTD/exec',
+          'https://script.google.com/macros/s/AKfycbzwGYmhlf_zxfXP3wVTnOdYiwo8hzs1Lv2OwEIbeVbyHpz_KcZ76jVIRY3d8wGk-z3l/exec',
+          'https://script.google.com/macros/s/AKfycbx41x3p5D-PO2UaWNa7Zwr7_8bgwLL3x7fZqYdZCDse9Zer-Zzm1fYDFbc_1OHTzSHT/exec',
+          'https://script.google.com/macros/s/AKfycbxeZWNtaWiEhN21N-k1DHt_GKhQp9sUA36ho85jEBWPxstBIx9yurcW7hZjRduEXz2O/exec',
+          'https://script.google.com/macros/s/AKfycbyFr-Dcrg8kvBtT12KmLJZmIdgBaDFhqZU7F6sozV_UJWuVhscp1wBsIX2RUO6dmgXE/exec',
+          'https://script.google.com/macros/s/AKfycbxXAUBPHis92OyOd0dpxFsvbmifO6w-71kpE6niDPrIS10yN2MDrqdY3w5TGWVHs06d/exec',
+          'https://script.google.com/macros/s/AKfycbzpaU9X9h9OIU1oSAAf4plC-V7bYih3vQk4mI9YvLCtU71W3wHwlFVO4p8hb7AD_clK/exec',
+          'https://script.google.com/macros/s/AKfycbxMOajugsg8XoDJQxqIDCrOSY6DZxAeYDXGdX7eQrbLtMQ4RLwmJsR3nPgsCUXkz0Tl/exec'
+          ]
+          rows=[]
+          for i,u in enumerate(urls,1):
+              out=f'/tmp/p{i}.txt'
+              q=u+'?'+urllib.parse.urlencode({'action':'ping','_':str(int(time.time()*1000))})
+              cmd=['curl','-L','--max-time','20','-sS','-o',out,'-w','%{http_code}|%{time_total}|%{time_starttransfer}|%{size_download}',q]
+              try:m=subprocess.check_output(cmd,text=True,stderr=subprocess.STDOUT).strip()
+              except Exception:m='ERR|0|0|0'
+              try:body=open(out,encoding='utf-8',errors='ignore').read()[:1000]
+              except:body=''
+              version=''
+              try:
+                  d=json.loads(body);version=str(d.get('version',''))
+              except: pass
+              row={'url':u,'metric':m,'version':version,'body':body[:300].replace('\n',' ')}
+              rows.append(row)
+              print('PROBE|'+str(i)+'|'+m+'|'+version+'|'+row['body'],flush=True)
+          open('inventory-gas-endpoint-probe.json','w').write(json.dumps(rows,ensure_ascii=False,indent=2))
+          PY
+      - name: Upload probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: inventory-gas-endpoint-probe
+          path: inventory-gas-endpoint-probe.json
