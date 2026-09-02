@@ -1,0 +1,106 @@
+name: MiteKore Post Timing Audit
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-post-timing-audit.yml'
+  workflow_dispatch:
+
+jobs:
+  timing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Measure real GAS post timing
+        shell: bash
+        run: |
+          set -u
+          GAS='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+          TS="$(date +%s%3N)"
+          POST_ID="mh_github_timing_${TS}"
+          USER_ID="github_timing_${TS}"
+          EDIT_TOKEN="github_timing_edit_${TS}_safe"
+          REQUEST_ID="github_timing_req_${TS}"
+          CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+          POST_JSON=$(node -e 'const [id,uid,at]=process.argv.slice(1); console.log(JSON.stringify({id,type:"url",text:"GitHub timing audit - auto delete",createdAt:at,updatedAt:at,author:{userId:uid,userName:"GitHub Timing",nickname:"",avatar:""},attachment:{url:"https://example.com/",commentsEnabled:false},shared:false,source:"github_timing_audit"}))' "$POST_ID" "$USER_ID" "$CREATED_AT")
+
+          cleanup() {
+            curl -L -sS -o /tmp/delete_cleanup.html \
+              --data-urlencode 'action=mitekore_post_delete_frame' \
+              --data-urlencode "requestId=cleanup_${REQUEST_ID}" \
+              --data-urlencode "postId=${POST_ID}" \
+              --data-urlencode "userId=${USER_ID}" \
+              --data-urlencode "editToken=${EDIT_TOKEN}" \
+              --data-urlencode 'appVersion=20.2.35.652' \
+              "$GAS" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          echo "POST_ID=$POST_ID"
+          POST_METRIC=$(curl -L -sS -o /tmp/post_response.html -w '%{http_code} %{time_total} %{time_starttransfer}' \
+            --data-urlencode 'action=mitekore_post_save_frame' \
+            --data-urlencode "requestId=${REQUEST_ID}" \
+            --data-urlencode "postJson=${POST_JSON}" \
+            --data-urlencode "editToken=${EDIT_TOKEN}" \
+            --data-urlencode 'appVersion=20.2.35.652' \
+            "$GAS")
+          read -r POST_HTTP POST_TOTAL POST_TTFB <<< "$POST_METRIC"
+          echo "POST_HTTP=$POST_HTTP POST_TOTAL=${POST_TOTAL}s POST_TTFB=${POST_TTFB}s"
+          echo '--- POST response head ---'
+          head -c 800 /tmp/post_response.html || true
+          echo
+
+          CONFIRM_START=$(date +%s%3N)
+          CONFIRMED=0
+          CONFIRM_ATTEMPTS=0
+          LAST_GET_TOTAL=''
+          for i in $(seq 1 40); do
+            CONFIRM_ATTEMPTS=$i
+            CB="ghTimingCb${TS}${i}"
+            GET_METRIC=$(curl -L -sS -o /tmp/feed_response.txt -w '%{http_code} %{time_total}' \
+              "$GAS?action=mitekore_feed&limit=100&callback=$CB&_=$(date +%s%3N)")
+            read -r GET_HTTP LAST_GET_TOTAL <<< "$GET_METRIC"
+            if grep -Fq "$POST_ID" /tmp/feed_response.txt; then
+              CONFIRMED=1
+              break
+            fi
+            sleep 0.5
+          done
+          CONFIRM_END=$(date +%s%3N)
+          CONFIRM_MS=$((CONFIRM_END-CONFIRM_START))
+          echo "CONFIRMED=$CONFIRMED CONFIRM_MS=$CONFIRM_MS ATTEMPTS=$CONFIRM_ATTEMPTS LAST_GET_TOTAL=${LAST_GET_TOTAL}s"
+
+          DELETE_METRIC=$(curl -L -sS -o /tmp/delete_response.html -w '%{http_code} %{time_total} %{time_starttransfer}' \
+            --data-urlencode 'action=mitekore_post_delete_frame' \
+            --data-urlencode "requestId=delete_${REQUEST_ID}" \
+            --data-urlencode "postId=${POST_ID}" \
+            --data-urlencode "userId=${USER_ID}" \
+            --data-urlencode "editToken=${EDIT_TOKEN}" \
+            --data-urlencode 'appVersion=20.2.35.652' \
+            "$GAS")
+          read -r DELETE_HTTP DELETE_TOTAL DELETE_TTFB <<< "$DELETE_METRIC"
+          echo "DELETE_HTTP=$DELETE_HTTP DELETE_TOTAL=${DELETE_TOTAL}s DELETE_TTFB=${DELETE_TTFB}s"
+
+          cat > post-timing-result.json <<JSON
+          {
+            "postId": "$POST_ID",
+            "postHttp": "$POST_HTTP",
+            "postTotalSeconds": $POST_TOTAL,
+            "postTtfbSeconds": $POST_TTFB,
+            "feedConfirmed": $CONFIRMED,
+            "feedConfirmMilliseconds": $CONFIRM_MS,
+            "feedConfirmAttempts": $CONFIRM_ATTEMPTS,
+            "lastFeedRequestSeconds": ${LAST_GET_TOTAL:-0},
+            "deleteHttp": "$DELETE_HTTP",
+            "deleteTotalSeconds": $DELETE_TOTAL,
+            "deleteTtfbSeconds": $DELETE_TTFB
+          }
+          JSON
+          cat post-timing-result.json
+          test "$POST_HTTP" = '200'
+          test "$CONFIRMED" = '1'
+      - name: Upload timing result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-post-timing-result
+          path: post-timing-result.json
