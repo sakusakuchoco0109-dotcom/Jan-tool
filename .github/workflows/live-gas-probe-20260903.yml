@@ -1,0 +1,40 @@
+name: Live GAS Probe 20260903
+on:
+  push:
+    paths:
+      - '.github/workflows/live-gas-probe-20260903.yml'
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Probe current GAS candidates
+        shell: bash
+        run: |
+          set +e
+          urls=(
+            'https://script.google.com/macros/s/AKfycbxMOajugsg8XoDJQxqIDCrOSY6DZxAeYDXGdX7eQrbLtMQ4RLwmJsR3nPgsCUXkz0Tl/exec'
+            'https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+            'https://script.google.com/macros/s/AKfycbxaMkHH82zvUrbD6ApFaRGc2BYwagveP6tdtPigEBla1C0cIXXmOz38wdBpu5KGegE/exec'
+            'https://script.google.com/macros/s/AKfycbyWM5vRqBPX2MTFP8PGhcbkDDatMwipOXP_GFwjpvMvnvxgj_dvx0spMvij9qOTWQ/exec'
+            'https://script.google.com/macros/s/AKfycbxC3TQmcdMfwiRskwUrTQSzhpZusvKsLqlM52Q98Bnk8ulB0ENtSjj5qmlYKX7ah6Wq/exec'
+            'https://script.google.com/macros/s/AKfycbyAbEirQPhHhEfD4vKvO3SCu8yc4GPRhcHk7-DTrivc1CcnoxOsPqVoIRDjW3JBqlo/exec'
+            'https://script.google.com/macros/s/AKfycbySkKuATSg__A88UuyWvzMOLoBZgTJRsQgPzkfLd0xXYaXcz1J21u1A3_izwyeJEwTD/exec'
+            'https://script.google.com/macros/s/AKfycbzwGYmhlf_zxfXP3wVTnOdYiwo8hzs1Lv2OwEIbeVbyHpz_KcZ76jVIRY3d8wGk-z3l/exec'
+            'https://script.google.com/macros/s/AKfycbx41x3p5D-PO2UaWNa7Zwr7_8bgwLL3x7fZqYdZCDse9Zer-Zzm1fYDFbc_1OHTzSHT/exec'
+            'https://script.google.com/macros/s/AKfycbxeZWNtaWiEhN21N-k1DHt_GKhQp9sUA36ho85jEBWPxstBIx9yurcW7hZjRduEXz2O/exec'
+            'https://script.google.com/macros/s/AKfycbyFr-Dcrg8kvBtT12KmLJZmIdgBaDFhqZU7F6sozV_UJWuVhscp1wBsIX2RUO6dmgXE/exec'
+            'https://script.google.com/macros/s/AKfycbxXAUBPHis92OyOd0dpxFsvbmifO6w-71kpE6niDPrIS10yN2MDrqdY3w5TGWVHs06d/exec'
+            'https://script.google.com/macros/s/AKfycbzpaU9X9h9OIU1oSAAf4plC-V7bYih3vQk4mI9YvLCtU71W3wHwlFVO4p8hb7AD_clK/exec'
+          )
+          i=0
+          for u in "${urls[@]}"; do
+            i=$((i+1))
+            echo "=== CANDIDATE $i ${u} ==="
+            for qs in 'action=ping' 'action=title_lookup&title=%E3%82%B9%E3%83%BC%E3%83%91%E3%83%BC%E3%83%9E%E3%83%AA%E3%82%AA%E3%83%96%E3%83%A9%E3%82%B6%E3%83%BC%E3%82%BA&platform=FC' 'action=camera_jan_lookup&jan=4902370832310'; do
+              echo "-- $qs"
+              curl -L -sS --max-time 18 -w '\nHTTP=%{http_code} TOTAL=%{time_total}\n' "$u?$qs&_=$(date +%s%N)" | head -c 1800
+              echo
+            done
+          done
