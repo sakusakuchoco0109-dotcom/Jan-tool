@@ -1,0 +1,189 @@
+name: MiteKore 3.12.35 Concurrency Test
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-31235-concurrency-test.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Run live concurrency test
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import subprocess, urllib.parse, json, re, time, random, statistics, concurrent.futures, sys
+
+          GAS='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+          APP='https://hilarious-haupia-6e0406.netlify.app/'
+          EXPECTED_GAS='3.12.35'
+          EXPECTED_HTML='RC1.4.641-concurrent-write'
+          RUN=str(int(time.time()))+str(random.randint(1000,9999))
+          users=[]
+
+          def curl(url, method='GET', form=None, timeout=90):
+            cmd=['curl','-L','--max-time',str(timeout),'-sS','-w','\n__META__%{http_code}|%{time_total}|%{time_starttransfer}']
+            if method=='POST':
+              cmd += ['-X','POST']
+              for k,v in (form or {}).items(): cmd += ['--data-urlencode', f'{k}={v}']
+            cmd += [url]
+            raw=subprocess.check_output(cmd,text=True)
+            body, meta=raw.rsplit('\n__META__',1)
+            code,total,ttfb=meta.strip().split('|')
+            return int(code),float(total),float(ttfb),body
+
+          def get_json(action, params=None, timeout=60):
+            q=dict(params or {}); q['action']=action; q['_']=str(time.time_ns())
+            code,total,ttfb,body=curl(GAS+'?'+urllib.parse.urlencode(q),timeout=timeout)
+            try:data=json.loads(body)
+            except Exception:data={'ok':False,'message':'JSON_PARSE_FAILED','raw':body[:300]}
+            return code,total,ttfb,data
+
+          def parse_pm(body):
+            m=re.search(r'window\.parent\.postMessage\((\{.*?\}),\s*"\*"\)',body,re.S)
+            if not m:
+              return {'ok':False,'message':'POSTMESSAGE_PARSE_FAILED','raw':body[:300]}
+            try:
+              obj=json.loads(m.group(1)); return obj.get('payload') or {}
+            except Exception as e:
+              return {'ok':False,'message':'POSTMESSAGE_JSON_FAILED:'+str(e),'raw':body[:300]}
+
+          def post_frame(action, fields, request_id, timeout=90):
+            form={'action':action,'requestId':request_id}
+            form.update(fields or {})
+            code,total,ttfb,body=curl(GAS,method='POST',form=form,timeout=timeout)
+            return code,total,ttfb,parse_pm(body)
+
+          # 0) Verify deployed versions before any writes.
+          code,total,ttfb,status=get_json('status')
+          print('VERIFY|gas|http=%s|sec=%.3f|version=%s|ok=%s'%(code,total,status.get('version'),status.get('ok')))
+          if status.get('version') != EXPECTED_GAS:
+            print('ABORT|Expected GAS %s, got %s'%(EXPECTED_GAS,status.get('version')))
+            sys.exit(2)
+          c,t,tf,html=curl(APP,timeout=60)
+          html_ok=EXPECTED_HTML in html
+          print('VERIFY|html|http=%s|sec=%.3f|marker=%s'%(c,t,html_ok))
+
+          # 1) share_preference_set: 8 concurrent writes to ONE brand-new user.
+          # If first-row creation is not atomic this is where duplicate users are likely to appear.
+          share_user='loadtest_share_'+RUN
+          users.append(share_user)
+          def share_once(i):
+            enabled='1' if i%2 else '0'; price='1' if i%3 else '0'
+            return i,get_json('share_preference_set',{'userId':share_user,'enabled':enabled,'price_enabled':price},timeout=30)
+          started=time.time()
+          with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            raw=list(ex.map(share_once,range(8)))
+          elapsed=time.time()-started
+          busy=[]; oks=[]; times=[]
+          for i,(code,sec,ttfb,data) in raw:
+            times.append(sec)
+            text=str(data.get('code',''))+' '+str(data.get('message',''))
+            if data.get('ok') is True: oks.append(i)
+            elif 'SHARE_PREFERENCE_BUSY' in text or '混み合' in text: busy.append(i)
+          print('SHARE_BURST|n=8|ok=%d|busy=%d|other=%d|wall=%.3f|median=%.3f|max=%.3f'%(len(oks),len(busy),8-len(oks)-len(busy),elapsed,statistics.median(times),max(times)))
+
+          # Browser-equivalent retry behavior for any busy share writes.
+          share_retry_results=[]
+          def share_client(i):
+            enabled='1' if i%2 else '0'; price='1' if i%3 else '0'
+            attempts=[]
+            for attempt in range(4):
+              code,sec,ttfb,data=get_json('share_preference_set',{'userId':share_user,'enabled':enabled,'price_enabled':price},timeout=30)
+              attempts.append((sec,data.get('ok'),data.get('code'),data.get('message')))
+              if data.get('ok') is True:return True,attempt+1,attempts
+              text=str(data.get('code',''))+' '+str(data.get('message',''))
+              if 'SHARE_PREFERENCE_BUSY' not in text and '混み合' not in text:return False,attempt+1,attempts
+              if attempt<3: time.sleep(min(2.2,0.5*(1.7**attempt)+0.15))
+            return False,4,attempts
+          with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            share_retry_results=list(ex.map(share_client,range(8)))
+          print('SHARE_RETRY|success=%d/8|max_attempts=%d'%(sum(1 for x in share_retry_results if x[0]),max(x[1] for x in share_retry_results)))
+
+          # 2) collection_sync_frame: four different users acting at once, exact client retry schedule.
+          sync_users=['loadtest_sync_%s_%d'%(RUN,i) for i in range(4)]
+          users.extend(sync_users)
+          def collection_client(uid,idx):
+            payload=json.dumps({'app':'fujiya_collection','userId':uid,'records':[]},ensure_ascii=False,separators=(',',':'))
+            attempts=[]
+            wall0=time.time()
+            for attempt in range(1,5):
+              rid='loadtest_col_%s_%d_%d'%(RUN,idx,attempt)
+              code,sec,ttfb,data=post_frame('collection_sync_frame',{'payload':payload},rid,timeout=45)
+              attempts.append({'attempt':attempt,'sec':sec,'ok':data.get('ok'),'code':data.get('code'),'message':data.get('message')})
+              if data.get('ok') is True:
+                return {'uid':uid,'ok':True,'attempts':attempt,'wall':time.time()-wall0,'history':attempts}
+              text=str(data.get('code',''))+' '+str(data.get('message',''))
+              if 'COLLECTION_SYNC_BUSY' not in text and '混み合' not in text and '自動再試行' not in text:
+                return {'uid':uid,'ok':False,'attempts':attempt,'wall':time.time()-wall0,'history':attempts}
+              if attempt<4: time.sleep(1.2 if attempt==1 else 2.5)
+            return {'uid':uid,'ok':False,'attempts':4,'wall':time.time()-wall0,'history':attempts}
+          t0=time.time()
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+            col4=list(ex.map(lambda x:collection_client(x[1],x[0]),enumerate(sync_users)))
+          print('COLLECTION_4|success=%d/4|wall=%.3f|max_client=%.3f|max_attempts=%d'%(sum(1 for x in col4 if x['ok']),time.time()-t0,max(x['wall'] for x in col4),max(x['attempts'] for x in col4)))
+          for x in col4:
+            print('COLLECTION_4_DETAIL|'+json.dumps(x,ensure_ascii=False,separators=(',',':')))
+
+          # 3) Higher burst: 8 users, same actual client retry policy.
+          stress_users=['loadtest_stress_%s_%d'%(RUN,i) for i in range(8)]
+          users.extend(stress_users)
+          t0=time.time()
+          with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            col8=list(ex.map(lambda x:collection_client(x[1],100+x[0]),enumerate(stress_users)))
+          print('COLLECTION_8|success=%d/8|wall=%.3f|max_client=%.3f|max_attempts=%d'%(sum(1 for x in col8 if x['ok']),time.time()-t0,max(x['wall'] for x in col8),max(x['attempts'] for x in col8)))
+          for x in col8:
+            if not x['ok'] or x['attempts']>1:
+              print('COLLECTION_8_DETAIL|'+json.dumps(x,ensure_ascii=False,separators=(',',':')))
+
+          # 4) Mixed features: one collection sync starts together with 6 share setting writes.
+          mixed_sync='loadtest_mixedsync_'+RUN; users.append(mixed_sync)
+          mixed_share=['loadtest_mixedshare_%s_%d'%(RUN,i) for i in range(6)]; users.extend(mixed_share)
+          barrier=None
+          def mixed_collection(): return collection_client(mixed_sync,999)
+          def mixed_share_one(uid,i):
+            wall0=time.time(); hist=[]
+            for attempt in range(4):
+              code,sec,ttfb,data=get_json('share_preference_set',{'userId':uid,'enabled':'1','price_enabled':'1'},timeout=30)
+              hist.append({'sec':sec,'ok':data.get('ok'),'code':data.get('code'),'message':data.get('message')})
+              if data.get('ok') is True:return {'uid':uid,'ok':True,'attempts':attempt+1,'wall':time.time()-wall0,'history':hist}
+              text=str(data.get('code',''))+' '+str(data.get('message',''))
+              if 'SHARE_PREFERENCE_BUSY' not in text and '混み合' not in text:return {'uid':uid,'ok':False,'attempts':attempt+1,'wall':time.time()-wall0,'history':hist}
+              if attempt<3: time.sleep(min(2.2,0.5*(1.7**attempt)+0.15))
+            return {'uid':uid,'ok':False,'attempts':4,'wall':time.time()-wall0,'history':hist}
+          t0=time.time()
+          with concurrent.futures.ThreadPoolExecutor(max_workers=7) as ex:
+            futs=[ex.submit(mixed_collection)] + [ex.submit(mixed_share_one,u,i) for i,u in enumerate(mixed_share)]
+            mixed=[f.result() for f in futs]
+          mc=mixed[0]; ms=mixed[1:]
+          print('MIXED|collection_ok=%s|share_success=%d/6|wall=%.3f|share_max_attempts=%d'%(mc['ok'],sum(1 for x in ms if x['ok']),time.time()-t0,max(x['attempts'] for x in ms)))
+          for x in mixed:
+            if (not x['ok']) or x['attempts']>1:
+              print('MIXED_DETAIL|'+json.dumps(x,ensure_ascii=False,separators=(',',':')))
+
+          # 5) Cleanup all synthetic user data. Also use deleted_users count to catch duplicate user rows.
+          cleanup_id='loadtest_cleanup_'+RUN
+          form={'confirm':'DELETE_ACCOUNT','userIds':json.dumps(users,separators=(',',':'))}
+          code,sec,ttfb,data=post_frame('account_delete_frame',form,cleanup_id,timeout=180)
+          print('CLEANUP|http=%s|sec=%.3f|ok=%s|deleted_users=%s|remaining=%s|code=%s|message=%s'%(code,sec,data.get('ok'),data.get('deleted_users'),data.get('remaining_records'),data.get('code'),data.get('message')))
+          print('EXPECTED_SYNTH_USERS|count=%d'%len(set(users)))
+
+          # Final summary. Do not fail only because the 8-user stress test exposes capacity limits; fail for corruption/cleanup/version issues.
+          fatal=[]
+          if not html_ok: fatal.append('HTML_MARKER_NOT_LIVE')
+          if sum(1 for x in share_retry_results if x[0]) < 8: fatal.append('SHARE_RETRY_FAILED')
+          if sum(1 for x in col4 if x['ok']) < 4: fatal.append('COLLECTION_4_FAILED')
+          if sum(1 for x in ms if x['ok']) < 6: fatal.append('MIXED_SHARE_FAILED')
+          if not mc['ok']: fatal.append('MIXED_COLLECTION_FAILED')
+          if data.get('ok') is not True or data.get('remaining_records') not in (0,'0'): fatal.append('CLEANUP_FAILED')
+          # exactly one row per synthetic user should have existed if all user-creating writes succeeded.
+          # Some stress users may never succeed, so deleted_users must never exceed unique synthetic users.
+          try:
+            du=int(data.get('deleted_users') or 0)
+            if du > len(set(users)): fatal.append('DUPLICATE_USER_ROWS')
+          except: fatal.append('BAD_CLEANUP_COUNT')
+          print('FINAL|fatal='+(','.join(fatal) if fatal else 'none')+'|stress8_success=%d/8'%sum(1 for x in col8 if x['ok']))
+          if fatal: sys.exit(3)
+          PY
