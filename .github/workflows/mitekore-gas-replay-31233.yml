@@ -1,4 +1,4 @@
-name: MiteKore GAS Replay 3.12.33
+name: MiteKore Inventory Pair Live Benchmark
 on:
   push:
     paths:
@@ -8,33 +8,35 @@ on:
 jobs:
   benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 25
     steps:
-      - name: Verify deployed GAS baseline
+      - name: Probe current deployed versions
         shell: bash
         run: |
           set +e
-          GAS='https://script.google.com/macros/s/AKfycbxoqua0rvTXWabQSPYnJ9wvjYP8EZ0L5i-PlAwZclreciDwtmAS6dJeBXNjJrScqijm1A/exec'
-          for qs in \
-            'action=test' \
-            'action=device_sync_probe' \
-            'action=mitereco_ping' \
-            'action=deployment_diagnostics'; do
-            echo "BASELINE|$qs"
-            curl -L -sS --max-time 60 -w '\nMETRIC|HTTP=%{http_code}|TOTAL=%{time_total}|TTFB=%{time_starttransfer}|SIZE=%{size_download}\n' "$GAS?$qs&_=$(date +%s%N)" | head -c 4000
+          MITE='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+          INV='https://script.google.com/macros/s/AKfycbxoqua0rvTXWabQSPYnJ9wvjYP8EZ0L5i-PlAwZclreciDwtmAS6dJeBXNjJrScqijm1A/exec'
+          echo '=== MITEKORE ==='
+          for qs in 'action=status' 'action=test' 'action=device_sync_probe' 'action=mitereco_ping' 'action=title_summary&platform=FC&title=%E3%82%B9%E3%83%BC%E3%83%91%E3%83%BC%E3%83%9E%E3%83%AA%E3%82%AA%E3%83%96%E3%83%A9%E3%82%B6%E3%83%BC%E3%82%BA'; do
+            echo "PROBE|MITE|$qs"
+            curl -L -sS --max-time 90 -w '\nMETRIC|HTTP=%{http_code}|TOTAL=%{time_total}|TTFB=%{time_starttransfer}|SIZE=%{size_download}\n' "$MITE?$qs&_=$(date +%s%N)" | head -c 4000
+            echo
+          done
+          echo '=== INVENTORY ==='
+          for qs in 'action=ping' 'action=title_lookup&platform=SFC&title=%E3%82%B9%E3%82%BF%E3%83%BC%E3%83%95%E3%82%A9%E3%83%83%E3%82%AF%E3%82%B9'; do
+            echo "PROBE|INV|$qs"
+            curl -L -sS --max-time 90 -w '\nMETRIC|HTTP=%{http_code}|TOTAL=%{time_total}|TTFB=%{time_starttransfer}|SIZE=%{size_download}\n' "$INV?$qs&_=$(date +%s%N)" | head -c 4000
             echo
           done
 
-      - name: Replay previous remaining-route benchmark against 3.12.33
+      - name: Replay live inventory contention benchmark
         shell: bash
         run: |
           set -euo pipefail
-          HIST='https://raw.githubusercontent.com/sakusakuchoco0109-dotcom/Jan-tool/9c0bfa6f28bce91ea4c6935cb6e9d53551958a0c/.github/workflows/mitekore-gas-remaining-benchmark.yml'
-          OLD='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
-          NEW='https://script.google.com/macros/s/AKfycbxoqua0rvTXWabQSPYnJ9wvjYP8EZ0L5i-PlAwZclreciDwtmAS6dJeBXNjJrScqijm1A/exec'
+          HIST='https://raw.githubusercontent.com/sakusakuchoco0109-dotcom/Jan-tool/a6f0063a79467c97321098f2202eec7f7cc675a5/.github/workflows/mitekore-inventory-concurrency-live.yml'
           curl -fsSL "$HIST" -o /tmp/historical.yml
-          sed -i "s#${OLD}#${NEW}#g; s#APP='20.2.35.652'#APP='RC1.4.640-stall-resilience'#g" /tmp/historical.yml
-          awk 'p { sub(/^          /, ""); print } /run: \|/ { p=1; next }' /tmp/historical.yml > /tmp/replay.sh
+          sed -i "s/if mv!='3.12.32' or iv!='2.9.12':/if False:/g; s/APP='20.2.35.652'/APP='RC1.4.640-stall-resilience'/g" /tmp/historical.yml
+          awk '/run: \|/ {p=1; next} p && /^      - name:/ {exit} p {sub(/^          /, ""); print}' /tmp/historical.yml > /tmp/replay.sh
           chmod +x /tmp/replay.sh
-          echo 'REPLAY_SOURCE|commit=9c0bfa6f28bce91ea4c6935cb6e9d53551958a0c|target=3.12.33-new-deployment'
+          echo 'REPLAY_SOURCE|a6f0063a79467c97321098f2202eec7f7cc675a5|current-pair'
           bash /tmp/replay.sh
