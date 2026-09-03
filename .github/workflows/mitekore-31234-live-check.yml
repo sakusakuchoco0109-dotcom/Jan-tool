@@ -1,0 +1,37 @@
+name: MiteKore 3.12.34 Live Check
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-31234-live-check.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify deployed version and store QR
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import subprocess, urllib.parse, time, json, statistics
+          GAS='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+          TOKEN='mq_4ed32d190a204431be7d71ddedff1395'
+          def call(action,params):
+            q=dict(params);q['action']=action;q['_']=str(time.time_ns())
+            url=GAS+'?'+urllib.parse.urlencode(q)
+            out='/tmp/out.json'
+            m=subprocess.check_output(['curl','-L','--max-time','60','-sS','-o',out,'-w','%{http_code}|%{time_total}|%{time_starttransfer}|%{size_download}',url],text=True).strip()
+            body=open(out,encoding='utf-8',errors='ignore').read()
+            try:data=json.loads(body)
+            except:data={}
+            print('LIVE|'+action+'|'+m+'|version='+str(data.get('version',''))+'|titles='+str(len(data.get('titles') or []))+'|ok='+str(data.get('ok',''))+'|message='+str(data.get('message','')))
+            return float(m.split('|')[1]),data
+          status=[]; qr=[]
+          for i in range(3):
+            status.append(call('status',{})[0]);time.sleep(.7)
+          for i in range(3):
+            qr.append(call('store_qr_batch_get',{'token':TOKEN})[0]);time.sleep(.7)
+          print('SUMMARY|status|median=%.3f|min=%.3f|max=%.3f'%(statistics.median(status),min(status),max(status)))
+          print('SUMMARY|qr|median=%.3f|min=%.3f|max=%.3f'%(statistics.median(qr),min(qr),max(qr)))
+          PY
