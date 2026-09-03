@@ -1,0 +1,65 @@
+name: MiteKore Store QR Breakdown
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-store-qr-breakdown.yml'
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Measure valid and missing QR paths
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import subprocess, urllib.parse, time, re, statistics, json
+          GAS='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+          VALID='mq_4ed32d190a204431be7d71ddedff1395'
+          MISSING='mq_missing_'+str(int(time.time()*1000))
+          rows=[]
+          def call(label,action,params,timeout=90):
+              q=dict(params);q['action']=action;q['_']=str(time.time_ns())
+              out='/tmp/'+re.sub(r'[^A-Za-z0-9_-]','_',label)+'.out'
+              url=GAS+'?'+urllib.parse.urlencode(q)
+              cmd=['curl','-L','--max-time',str(timeout),'-sS','-o',out,'-w','%{http_code}|%{time_total}|%{time_starttransfer}|%{size_download}',url]
+              try:m=subprocess.check_output(cmd,text=True,stderr=subprocess.STDOUT).strip()
+              except subprocess.CalledProcessError:m='ERR|0|0|0'
+              p=m.split('|');sec=float(p[1] or 0) if len(p)>1 else 0
+              try:body=open(out,encoding='utf-8',errors='ignore').read()
+              except:body=''
+              row={'label':label,'action':action,'http':p[0] if p else 'ERR','seconds':sec,'ttfb':float(p[2] or 0) if len(p)>2 else 0,'bytes':int(float(p[3] or 0)) if len(p)>3 else 0,'preview':re.sub(r'\s+',' ',body)[:240]}
+              rows.append(row);print('QRBENCH|'+label+'|'+action+'|'+row['http']+f'|{sec:.3f}|'+row['preview'],flush=True);return row
+          def pause():time.sleep(.8)
+          # baseline
+          for i in range(2):call(f'status_{i+1}','status',{});pause()
+          # actual front-end path first: frame, then same token again
+          valid_frame=[]
+          for i in range(3):
+              valid_frame.append(call(f'valid_frame_{i+1}','store_qr_batch_get_frame',{'token':VALID,'requestId':f'qrbench_{i+1}'}));pause()
+          valid_get=[]
+          for i in range(3):
+              valid_get.append(call(f'valid_get_{i+1}','store_qr_batch_get',{'token':VALID}));pause()
+          missing_frame=[]
+          for i in range(3):
+              missing_frame.append(call(f'missing_frame_{i+1}','store_qr_batch_get_frame',{'token':MISSING,'requestId':f'miss_{i+1}'}));pause()
+          missing_get=[]
+          for i in range(3):
+              missing_get.append(call(f'missing_get_{i+1}','store_qr_batch_get',{'token':MISSING}));pause()
+          # empty-token short circuit
+          empty=[]
+          for i in range(3):empty.append(call(f'empty_{i+1}','store_qr_batch_get',{}));pause()
+          def sm(name,rs):
+              x=[r['seconds'] for r in rs]
+              s={'name':name,'samples':x,'median':statistics.median(x),'min':min(x),'max':max(x)}
+              print(f"SUMMARY|{name}|median={s['median']:.3f}|min={s['min']:.3f}|max={s['max']:.3f}|samples="+','.join(f'{v:.3f}' for v in x),flush=True)
+              return s
+          summary=[sm('valid_frame',valid_frame),sm('valid_get',valid_get),sm('missing_frame',missing_frame),sm('missing_get',missing_get),sm('empty_get',empty)]
+          json.dump({'rows':rows,'summary':summary},open('store-qr-breakdown.json','w'),ensure_ascii=False,indent=2)
+          PY
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-store-qr-breakdown
+          path: store-qr-breakdown.json
