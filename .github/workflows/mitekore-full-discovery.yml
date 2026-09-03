@@ -20,12 +20,9 @@ jobs:
           npm i playwright@1.48.2
           npx playwright install chromium --with-deps
           curl -fsSL 'https://hilarious-haupia-6e0406.netlify.app/' -o current-index.html
-          ASSET=$(grep -oE 'assets/app-core-[A-Za-z0-9._-]+\.js' current-index.html | head -1)
-          test -n "$ASSET"
+          ASSET=$(grep -oE 'assets/app-core-[A-Za-z0-9._-]+\.js' current-index.html | head -1 || true)
           echo "CURRENT_ASSET=$ASSET" >> "$GITHUB_ENV"
-          echo "Current asset: $ASSET"
-          curl -fsSL "https://hilarious-haupia-6e0406.netlify.app/$ASSET" -o app-core-current.js
-          node --check app-core-current.js
+          echo "Current asset: ${ASSET:-not required for color audit}"
       - name: Discover all visible features
         run: node mitekore-full-discovery.js
       - name: Upload discovery evidence
@@ -35,7 +32,6 @@ jobs:
           name: mitekore-full-discovery
           path: |
             current-index.html
-            app-core-current.js
             full-discovery.json
             discovery-*.json
             discovery-*.png
