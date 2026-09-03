@@ -1,0 +1,76 @@
+name: MiteKore Inventory Concurrency Status Check
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-inventory-concurrency-status-check.yml'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check busy detection and recovery
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import subprocess,urllib.parse,json,time,re,hashlib,pathlib,concurrent.futures
+          M='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+          I='https://script.google.com/macros/s/AKfycbxoqua0rvTXWabQSPYnJ9wvjYP8EZ0L5i-PlAwZclreciDwtmAS6dJeBXNjJrScqijm1A/exec'
+          APP='20.2.35.652';ts=str(int(time.time()*1000));user='github_conc_status_'+ts;sync='mk_'+hashlib.sha256(ts.encode()).hexdigest()[:40]
+          old=pathlib.Path('.github/workflows/mitekore-inventory-concurrency-live.yml').read_text(); key=re.search(r"INV_WRITE_KEY='([^']+)'",old).group(1)
+          out=[]
+          def parse(s):
+            s=s.strip()
+            try:return json.loads(s)
+            except:pass
+            m=re.match(r'^[A-Za-z_$][A-Za-z0-9_$.]*\((.*)\)\s*;?$',s,re.S)
+            if m:
+              try:return json.loads(m.group(1))
+              except:pass
+            return None
+          def call(url,method,fields,timeout=180):
+            f=dict(fields)
+            if method=='GET':
+              f['_']=str(int(time.time()*1000));cmd=['curl','-L','--max-time',str(timeout),'-sS','-w','\nM%{http_code}|%{time_total}',url+'?'+urllib.parse.urlencode(f)]
+            else:
+              cmd=['curl','-L','--max-time',str(timeout),'-sS','-w','\nM%{http_code}|%{time_total}']
+              for k,v in f.items():cmd+=['--data-urlencode',str(k)+'='+str(v)]
+              cmd.append(url)
+            p=subprocess.run(cmd,capture_output=True,text=True);body,met=p.stdout.rsplit('\nM',1) if '\nM' in p.stdout else (p.stdout,'ERR|0');z=met.split('|');return {'http':z[0],'seconds':float(z[1]),'data':parse(body),'preview':re.sub(r'\s+',' ',body)[:160]}
+          def log(name,r):
+            d=r['data'] if isinstance(r['data'],dict) else {'preview':r['preview']}; rec={'name':name,'http':r['http'],'seconds':r['seconds'],'data':d};out.append(rec);print('CHECK|'+name+'|'+r['http']+'|'+f"{r['seconds']:.3f}"+'|'+json.dumps(d,ensure_ascii=False)[:700],flush=True);return r
+          lk=call(I,'GET',{'action':'title_lookup','title':'スターフォックス','platform':'SFC'},120);item=(lk['data'] or {}).get('masterItem')
+          def v(*ks):
+            for k in ks:
+              if k in item and item[k] is not None:return item[k]
+            return ''
+          reqkey='status_'+ts
+          inv={'action':'product_master_upsert','requestId':'inv_'+ts,'write_request_key':reqkey,'write_key':key,'mode':'update','product_master_id':v('productMasterId'),'shared_title_id':v('sharedTitleId'),'platform':v('platform'),'title':v('title'),'edition_label':v('editionLabel'),'jan':v('jan'),'model':v('model'),'maker':v('maker'),'release_date':v('releaseDate'),'genre':v('genre'),'image_url':v('imageUrl'),'image_source':v('imageSource'),'source_label':'GitHub競合状態確認・同値更新'}
+          collid='coll_'+ts;devid='dev_'+ts
+          cp=json.dumps({'app':'fujiya_collection','version':APP,'exportedAt':time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),'userId':user,'purchasePriceShared':0,'records':[]},ensure_ascii=False,separators=(',',':'))
+          dp=json.dumps({'app':'fujiya_device_sync','version':3,'syncKey':sync,'expectedRevision':0,'userId':user,'appVersion':APP,'deviceId':'bench','deviceName':'bench','records':[]},ensure_ascii=False,separators=(',',':'))
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+            fi=ex.submit(call,I,'POST',inv,240);time.sleep(.65)
+            ft=ex.submit(call,M,'GET',{'action':'title_summary','platform':'FC','title':'スーパーマリオブラザーズ','canonicalTitle':'スーパーマリオブラザーズ'},180)
+            fc=ex.submit(call,M,'POST',{'action':'collection_sync_frame','requestId':collid,'appVersion':APP,'payload':cp},180)
+            fd=ex.submit(call,M,'POST',{'action':'device_sync_push_frame','requestId':devid,'appVersion':APP,'payload':dp},180)
+            log('during_title',ft.result());log('during_collection_post',fc.result());log('during_device_post',fd.result());log('inventory_post',fi.result())
+          log('collection_status',call(M,'GET',{'action':'collection_sync_status','requestId':collid},90))
+          log('device_status',call(M,'GET',{'action':'device_sync_status','requestId':devid},90))
+          log('inventory_status',call(I,'GET',{'action':'product_master_write_status','write_key':key,'write_request_key':reqkey},90))
+          # Same operations after inventory is done, equivalent to client auto-retry.
+          coll2='coll_retry_'+ts;dev2='dev_retry_'+ts
+          log('retry_collection_post',call(M,'POST',{'action':'collection_sync_frame','requestId':coll2,'appVersion':APP,'payload':cp},180))
+          log('retry_collection_status',call(M,'GET',{'action':'collection_sync_status','requestId':coll2},90))
+          log('retry_device_post',call(M,'POST',{'action':'device_sync_push_frame','requestId':dev2,'appVersion':APP,'payload':dp},180))
+          log('retry_device_status',call(M,'GET',{'action':'device_sync_status','requestId':dev2},90))
+          try:call(M,'POST',{'action':'reset_user_collection_frame','requestId':'clean_'+ts,'userId':user,'appVersion':APP},180)
+          except:pass
+          json.dump(out,open('status.json','w'),ensure_ascii=False,indent=2)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-inventory-concurrency-status-check
+          path: status.json
