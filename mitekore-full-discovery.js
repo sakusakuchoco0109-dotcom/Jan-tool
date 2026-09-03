@@ -1,7 +1,7 @@
 const { chromium } = require('playwright');
 const fs=require('fs');
 const APP='https://hilarious-haupia-6e0406.netlify.app/';
-const currentJs=fs.readFileSync('app-core-current.js','utf8');
+const currentJs=fs.existsSync('app-core-current.js')?fs.readFileSync('app-core-current.js','utf8'):'';
 const NAME='ChatGPT総合検証0814';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function makeContext(browser,phone=false){
