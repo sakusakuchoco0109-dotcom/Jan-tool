@@ -1,0 +1,136 @@
+name: MiteKore 3.12.37 New User Fastpath Test
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-31237-newuser-test.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Run live benchmark
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import subprocess, urllib.parse, json, re, time, random, concurrent.futures, statistics
+          GAS='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+          RUN=str(int(time.time()))+str(random.randint(1000,9999)); users=[]
+
+          def curl(url, form=None, timeout=60):
+            cmd=['curl','-L','--connect-timeout','10','--max-time',str(timeout),'-sS','-w','\n__META__%{http_code}|%{time_total}|%{time_starttransfer}']
+            if form is not None:
+              for k,v in form.items(): cmd += ['--data-urlencode',f'{k}={v}']
+            cmd += [url]
+            p=subprocess.run(cmd,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            if p.returncode:return 0,float(timeout),p.stdout,{'timeout':p.returncode==28,'stderr':p.stderr.strip()[:200]}
+            try:
+              body,meta=p.stdout.rsplit('\n__META__',1);code,total,_=meta.strip().split('|');return int(code),float(total),body,{}
+            except Exception as e:return 0,0,p.stdout,{'stderr':str(e)}
+
+          def get_json(action,params=None,timeout=60):
+            q=dict(params or {});q['action']=action;q['_']=str(time.time_ns())
+            code,sec,body,err=curl(GAS+'?'+urllib.parse.urlencode(q),timeout=timeout)
+            if err:return code,sec,{'ok':False,'code':'TRANSPORT_TIMEOUT' if err.get('timeout') else 'TRANSPORT_ERROR','message':err.get('stderr')}
+            try:return code,sec,json.loads(body)
+            except:return code,sec,{'ok':False,'code':'JSON_PARSE_FAILED','message':body[:180]}
+
+          def parse_pm(body):
+            m=re.search(r'window\.parent\.postMessage\((\{.*?\}),\s*["\']\*["\']\)',body,re.S)
+            if m:
+              try:return json.loads(m.group(1)).get('payload') or {}
+              except:pass
+            return {'ok':False,'code':'POSTMESSAGE_PARSE_FAILED','message':body[:180]}
+
+          def post_frame(action,fields,rid,timeout=70):
+            form={'action':action,'requestId':rid};form.update(fields)
+            code,sec,body,err=curl(GAS,form=form,timeout=timeout)
+            if err:return code,sec,{'ok':False,'code':'TRANSPORT_TIMEOUT' if err.get('timeout') else 'TRANSPORT_ERROR','message':err.get('stderr')}
+            return code,sec,parse_pm(body)
+
+          def poll(action,rid,tries=8):
+            last={}
+            for _ in range(tries):
+              _,_,last=get_json(action,{'requestId':rid},timeout=40)
+              if last.get('status') in ('completed','error') or last.get('pending') is False:return last
+              time.sleep(.7)
+            return last
+
+          def busy(d):
+            s=(str(d.get('code',''))+' '+str(d.get('message',''))).upper(); return 'BUSY' in s or '混み合' in s or '自動再試行' in s
+
+          # Warm endpoint and verify version.
+          for i in range(3):
+            _,sec,st=get_json('status',timeout=60);print('STATUS_%d|sec=%.3f|version=%s|ok=%s'%(i+1,sec,st.get('version'),st.get('ok')));time.sleep(.4)
+          if st.get('version')!='3.12.37':print('FINAL|abort=VERSION');raise SystemExit(0)
+
+          # 1) Six truly new users, sequential first write. This is the main comparison with 3.12.36.
+          new_users=['loadtest_31237_new_%s_%d'%(RUN,i) for i in range(6)]; users+=new_users
+          new_rows=[]
+          for u in new_users:
+            _,sec,d=get_json('share_preference_set',{'userId':u,'enabled':'1','price_enabled':'1'},timeout=50)
+            if d.get('ok') is not True and d.get('code') in ('JSON_PARSE_FAILED','TRANSPORT_TIMEOUT'):
+              _,_,state=get_json('share_preference_get',{'userId':u},timeout=40)
+              if state.get('enabled') is True:d={'ok':True,'recovered':True}
+            new_rows.append({'sec':sec,'ok':d.get('ok') is True,'code':d.get('code')})
+            print('NEW_USER|sec=%.3f|ok=%s|code=%s'%(sec,d.get('ok'),d.get('code')))
+          secs=[x['sec'] for x in new_rows]
+          print('NEW_USER_SUMMARY|success=%d/6|median=%.3f|max=%.3f|min=%.3f'%(sum(x['ok'] for x in new_rows),statistics.median(secs),max(secs),min(secs)))
+
+          # 2) Same brand-new user hit four ways at once. Must end as one logical user, all callers eventually succeed/read-back.
+          same='loadtest_31237_same_'+RUN;users.append(same)
+          def same_client(i):
+            hist=[];t=time.time()
+            for a in range(4):
+              _,sec,d=get_json('share_preference_set',{'userId':same,'enabled':'1','price_enabled':'1'},timeout=45);hist.append((sec,d.get('ok'),d.get('code')))
+              if d.get('ok') is True:return {'ok':True,'attempts':a+1,'wall':time.time()-t,'hist':hist}
+              if d.get('code') in ('JSON_PARSE_FAILED','TRANSPORT_TIMEOUT'):
+                _,_,state=get_json('share_preference_get',{'userId':same},timeout=40)
+                if state.get('enabled') is True:return {'ok':True,'attempts':a+1,'wall':time.time()-t,'hist':hist,'recovered':True}
+              if not busy(d):return {'ok':False,'attempts':a+1,'wall':time.time()-t,'hist':hist}
+              if a<3:time.sleep([.65,1.0,1.5][a]+random.random()*.25)
+            return {'ok':False,'attempts':4,'wall':time.time()-t,'hist':hist}
+          t=time.time()
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:samer=list(ex.map(same_client,range(4)))
+          print('SAME_USER_4|success=%d/4|wall=%.3f|max_client=%.3f|max_attempts=%d'%(sum(x['ok'] for x in samer),time.time()-t,max(x['wall'] for x in samer),max(x['attempts'] for x in samer)))
+
+          # 3) Existing-user concurrent update regression check.
+          def existing_client(u):
+            hist=[];t=time.time()
+            for a in range(4):
+              _,sec,d=get_json('share_preference_set',{'userId':u,'enabled':'0','price_enabled':'1'},timeout=45);hist.append((sec,d.get('ok'),d.get('code')))
+              if d.get('ok') is True:return {'ok':True,'attempts':a+1,'wall':time.time()-t,'hist':hist}
+              if not busy(d):return {'ok':False,'attempts':a+1,'wall':time.time()-t,'hist':hist}
+              if a<3:time.sleep([.65,1.0,1.5][a]+random.random()*.25)
+            return {'ok':False,'attempts':4,'wall':time.time()-t,'hist':hist}
+          base=new_users[:4]
+          t=time.time()
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:er=list(ex.map(existing_client,base))
+          print('EXISTING4|success=%d/4|wall=%.3f|median_client=%.3f|max_client=%.3f|max_attempts=%d'%(sum(x['ok'] for x in er),time.time()-t,statistics.median(x['wall'] for x in er),max(x['wall'] for x in er),max(x['attempts'] for x in er)))
+
+          # 4) Existing-user collection sync regression check.
+          def col(u,idx):
+            payload=json.dumps({'app':'fujiya_collection','userId':u,'records':[]},separators=(',',':'));hist=[];t=time.time()
+            for a in range(1,5):
+              rid='loadtest_31237_col_%s_%d_%d'%(RUN,idx,a)
+              _,sec,d=post_frame('collection_sync_frame',{'payload':payload},rid,timeout=60)
+              if d.get('ok') is not True:
+                p=poll('collection_sync_status',rid,5)
+                if p:d=p
+              hist.append((sec,d.get('ok'),d.get('status'),d.get('code')))
+              if d.get('ok') is True and d.get('status') in (None,'completed'):return {'ok':True,'attempts':a,'wall':time.time()-t,'hist':hist}
+              if not busy(d) and d.get('code') not in ('POSTMESSAGE_PARSE_FAILED','JSON_PARSE_FAILED','TRANSPORT_TIMEOUT'):return {'ok':False,'attempts':a,'wall':time.time()-t,'hist':hist}
+              if a<4:time.sleep([.65,1.0,1.5][a-1]+random.random()*.25)
+            return {'ok':False,'attempts':4,'wall':time.time()-t,'hist':hist}
+          t=time.time()
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:cr=list(ex.map(lambda q:col(q[1],q[0]),enumerate(base)))
+          print('COL4|success=%d/4|wall=%.3f|median_client=%.3f|max_client=%.3f|max_attempts=%d'%(sum(x['ok'] for x in cr),time.time()-t,statistics.median(x['wall'] for x in cr),max(x['wall'] for x in cr),max(x['attempts'] for x in cr)))
+
+          # Cleanup all synthetic users; status is authoritative even when HtmlService body is wrapped.
+          rid='loadtest_31237_cleanup_'+RUN
+          _,postsec,_=post_frame('account_delete_frame',{'confirm':'DELETE_ACCOUNT','userIds':json.dumps(users,separators=(',',':'))},rid,timeout=180)
+          clean=poll('account_delete_status',rid,10)
+          print('CLEANUP|post_sec=%.3f|status=%s|ok=%s|deleted_users=%s|remaining=%s|expected=%d'%(postsec,clean.get('status'),clean.get('ok'),clean.get('deleted_users'),clean.get('remaining_records'),len(set(users))))
+          print('FINAL|new=%d/6|same=%d/4|existing=%d/4|col=%d/4|cleanup=%s'%(sum(x['ok'] for x in new_rows),sum(x['ok'] for x in samer),sum(x['ok'] for x in er),sum(x['ok'] for x in cr),clean.get('status')))
+          PY
