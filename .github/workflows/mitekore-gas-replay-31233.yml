@@ -1,4 +1,4 @@
-name: MiteKore 3.12.33 Outlier Recheck
+name: MiteKore 3.12.33 Final Slow-Path Recheck
 on:
   push:
     paths:
@@ -8,63 +8,59 @@ on:
 jobs:
   recheck:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
-      - name: Recheck outliers sequentially
+      - name: Recheck actual slow paths
         shell: bash
         run: |
           python3 <<'PY'
           import subprocess, urllib.parse, json, time, statistics, re, hashlib
           GAS='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
           APP='RC1.4.640-stall-resilience'
-          TS=str(int(time.time()*1000)); UID='github_outlier_'+TS
-          rows=[]
-          def call(label, action, params=None, method='GET', timeout=180):
+          TS=str(int(time.time()*1000)); rows=[]
+          def call(label,action,params=None,method='GET',timeout=420):
               params=dict(params or {}); params['action']=action; params['_']=str(time.time_ns())
               out='/tmp/'+re.sub(r'[^A-Za-z0-9_-]','_',label)+'.out'
               if method=='GET':
                   url=GAS+'?'+urllib.parse.urlencode(params)
                   cmd=['curl','-L','--max-time',str(timeout),'-sS','-o',out,'-w','%{http_code}|%{time_total}|%{time_starttransfer}|%{size_download}',url]
               else:
-                  params.setdefault('requestId','outlier_'+label+'_'+TS)
+                  params.setdefault('requestId','final_'+label+'_'+TS)
                   params.setdefault('appVersion',APP)
                   cmd=['curl','-L','--max-time',str(timeout),'-sS','-o',out,'-w','%{http_code}|%{time_total}|%{time_starttransfer}|%{size_download}']
-                  for k,v in params.items(): cmd += ['--data-urlencode',str(k)+'='+str(v)]
+                  for k,v in params.items():cmd+=['--data-urlencode',str(k)+'='+str(v)]
                   cmd.append(GAS)
               try:m=subprocess.check_output(cmd,text=True,stderr=subprocess.STDOUT).strip()
               except subprocess.CalledProcessError as e:m='ERR|0|0|0'
-              p=m.split('|'); sec=float(p[1] or 0) if len(p)>1 else 0
+              p=m.split('|');sec=float(p[1] or 0) if len(p)>1 else 0
               try:body=open(out,encoding='utf-8',errors='ignore').read()
               except:body=''
-              row={'label':label,'action':action,'http':p[0] if p else 'ERR','seconds':sec,'ttfb':float(p[2] or 0) if len(p)>2 else 0,'bytes':int(float(p[3] or 0)) if len(p)>3 else 0,'preview':re.sub(r'\s+',' ',body)[:260]}
-              rows.append(row); print('OUTLIER|'+label+'|'+action+'|'+row['http']+f'|{sec:.3f}|'+row['preview'], flush=True)
-              return row
-          def repeat(name, action, params, n=3, method='GET', timeout=180):
-              vals=[]; hs=[]
-              for i in range(n):
-                  r=call(f'{name}_{i+1}',action,params,method,timeout); vals.append(r['seconds']); hs.append(r['http']); time.sleep(.7)
-              print(f'SUMMARY|{name}|median={statistics.median(vals):.3f}|min={min(vals):.3f}|max={max(vals):.3f}|http={hs}', flush=True)
-              return {'name':name,'samples':vals,'median':statistics.median(vals),'min':min(vals),'max':max(vals),'http':hs}
+              row={'label':label,'action':action,'method':method,'http':p[0] if p else 'ERR','seconds':sec,'ttfb':float(p[2] or 0) if len(p)>2 else 0,'bytes':int(float(p[3] or 0)) if len(p)>3 else 0,'preview':re.sub(r'\s+',' ',body)[:320]}
+              rows.append(row);print('FINAL|'+label+'|'+action+'|'+method+'|'+row['http']+f'|{sec:.3f}|'+row['preview'],flush=True);return row
+          def stat(name, vals):
+              x=[r['seconds'] for r in vals];print(f'SUMMARY|{name}|median={statistics.median(x):.3f}|min={min(x):.3f}|max={max(x):.3f}|samples='+','.join(f'{v:.3f}' for v in x),flush=True)
+              return {'name':name,'median':statistics.median(x),'min':min(x),'max':max(x),'samples':x,'http':[r['http'] for r in vals]}
           summaries=[]
-          call('status','status',{},'GET',60)
-          summaries.append(repeat('rss_feed','magazine_rss_feed',{'feedUrl':'https://hnrss.org/frontpage','limit':'5','force':'1'},3,'GET',120))
-          summaries.append(repeat('qr_batch_missing','store_qr_batch_get',{'batchId':'missing_'+TS},3,'GET',90))
-          pullvals=[]; pullhs=[]; pushvals=[]
+          status=[]
+          for i in range(3):status.append(call(f'status_{i+1}','status',{},'GET',60));time.sleep(.7)
+          summaries.append(stat('status',status))
+          share=[]; avatar=[]; deletion=[]; delete_status=[]
           for i in range(3):
-              sync='mk_'+hashlib.sha256((TS+'-'+str(i)).encode()).hexdigest()[:40]
-              payload=json.dumps({'app':'fujiya_device_sync','version':3,'syncKey':sync,'expectedRevision':0,'userId':UID,'appVersion':APP,'deviceId':'outlier_'+str(i),'deviceName':'GitHub Outlier','records':[]},ensure_ascii=False,separators=(',',':'))
-              pr=call(f'device_push_{i+1}','device_sync_push_frame',{'payload':payload},'POST',90); pushvals.append(pr['seconds'])
-              time.sleep(.7)
-              rr=call(f'device_pull_after_push_{i+1}','device_sync_pull',{'syncKey':sync,'clientVersion':'3','userId':UID,'appVersion':APP},'GET',90); pullvals.append(rr['seconds']); pullhs.append(rr['http'])
-              time.sleep(.7)
-          summaries.append({'name':'device_push','samples':pushvals,'median':statistics.median(pushvals),'min':min(pushvals),'max':max(pushvals)})
-          summaries.append({'name':'device_pull_after_push','samples':pullvals,'median':statistics.median(pullvals),'min':min(pullvals),'max':max(pullvals),'http':pullhs})
-          print(f'SUMMARY|device_pull_after_push|median={statistics.median(pullvals):.3f}|min={min(pullvals):.3f}|max={max(pullvals):.3f}|http={pullhs}',flush=True)
-          json.dump({'rows':rows,'summary':summaries},open('outlier-recheck.json','w'),ensure_ascii=False,indent=2)
+              uid=f'github_final_{TS}_{i+1}';alias=f'{uid}_alias';author=f'{uid}_author';sync='mk_'+hashlib.sha256(uid.encode()).hexdigest()[:40]
+              share.append(call(f'share_preference_set_{i+1}','share_preference_set',{'userId':uid,'enabled':'1','price_enabled':'0'},'GET',180));time.sleep(.7)
+              avatar.append(call(f'profile_avatar_save_frame_{i+1}','profile_avatar_save_frame',{'userId':uid,'imageData':'data:image/png;base64,iVBORw0KGgo='},'POST',180));time.sleep(.7)
+              req=f'acct_final_{TS}_{i+1}'
+              deletion.append(call(f'account_delete_frame_{i+1}','account_delete_frame',{'requestId':req,'userId':uid,'userIds':json.dumps([uid,alias,author]),'miteRecoToken':'','syncKey':sync,'confirm':'DELETE_ACCOUNT'},'POST',420));time.sleep(.7)
+              delete_status.append(call(f'account_delete_status_{i+1}','account_delete_status',{'requestId':req},'GET',120));time.sleep(.7)
+          summaries.append(stat('share_preference_set_actual_get',share))
+          summaries.append(stat('profile_avatar_save_frame_rejection',avatar))
+          summaries.append(stat('account_delete_frame',deletion))
+          summaries.append(stat('account_delete_status_after',delete_status))
+          json.dump({'rows':rows,'summary':summaries},open('final-slow-path-recheck.json','w'),ensure_ascii=False,indent=2)
           PY
-      - name: Upload recheck
+      - name: Upload final recheck
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mitekore-31233-outlier-recheck
-          path: outlier-recheck.json
+          name: mitekore-31233-final-slow-path-recheck
+          path: final-slow-path-recheck.json
