@@ -1,0 +1,67 @@
+name: MiteKore 3.12.40 Self Restore Phase1
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-31240-selfrestore-phase1.yml'
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify and create synthetic current state
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import subprocess,urllib.parse,json,re,time
+          GAS='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+          APP='https://hilarious-haupia-6e0406.netlify.app/'
+          UID='loadtest_selfrestore_31240_20260903_1603'
+          KEY='mk_SR31240_20260903_160300_ABCDEFGH'
+          TOKEN='rt_SR31240_20260903_160300_QWERTYUIOPASDFGH'
+          DEVICE='selfrestore-test-device-31240'
+          def curl(url,form=None,timeout=60):
+            cmd=['curl','-L','--connect-timeout','10','--max-time',str(timeout),'-sS','-w','\n__M__%{http_code}|%{time_total}']
+            if form:
+              for k,v in form.items(): cmd+=['--data-urlencode',f'{k}={v}']
+            cmd+=[url]; p=subprocess.run(cmd,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            if p.returncode:return 0,float(timeout),p.stdout,{'error':p.stderr[:200]}
+            body,m=p.stdout.rsplit('\n__M__',1); code,sec=m.strip().split('|'); return int(code),float(sec),body,{}
+          def get(action,params=None,timeout=60):
+            q=dict(params or {}); q['action']=action; q['_']=str(time.time_ns()); c,s,b,e=curl(GAS+'?'+urllib.parse.urlencode(q),timeout=timeout)
+            if e:return c,s,{'ok':False,'code':'TRANSPORT'}
+            try:return c,s,json.loads(b)
+            except:return c,s,{'ok':False,'code':'PARSE','body':b[:180]}
+          def parse_pm(b):
+            m=re.search(r'window\.parent\.postMessage\((\{.*?\}),\s*["\']\*["\']\)',b,re.S)
+            if m:
+              try:return json.loads(m.group(1)).get('payload') or {}
+              except: pass
+            return {'ok':False,'code':'PM_PARSE','body':b[:180]}
+          def post(action,fields,rid,timeout=70):
+            f={'action':action,'requestId':rid};f.update(fields);c,s,b,e=curl(GAS,f,timeout)
+            if e:return c,s,{'ok':False,'code':'TRANSPORT'}
+            return c,s,parse_pm(b)
+          def poll(action,rid,tries=10):
+            last={}
+            for _ in range(tries):
+              _,_,last=get(action,{'requestId':rid},40)
+              if last.get('status') in ('completed','error') or last.get('pending') is False:return last
+              time.sleep(.7)
+            return last
+          _,sec,st=get('status'); print('VERIFY_GAS|sec=%.3f|version=%s|ok=%s'%(sec,st.get('version'),st.get('ok')))
+          c,hs,html,e=curl(APP+'?ct=14659',timeout=30); print('VERIFY_HTML|http=%s|sec=%.3f|marker=%s'%(c,hs,'RC1.4.644-self-restore-cache-bust' in html))
+          now=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
+          records=[
+            {'id':'__mitekore_self_restore_identity_v1__','updatedAt':now,'deletedAt':'','deviceId':DEVICE,'data':{'kind':'self_restore_identity_v1','schema':1,'userId':UID,'recoveryToken':TOKEN}},
+            {'id':'test_game_A','updatedAt':now,'deletedAt':'','deviceId':DEVICE,'data':{'kind':'collection_entry_v1','title':'TEST GAME A','platform':'TEST'}},
+            {'id':'test_game_B','updatedAt':now,'deletedAt':'','deviceId':DEVICE,'data':{'kind':'collection_entry_v1','title':'TEST GAME B','platform':'TEST'}}
+          ]
+          payload=json.dumps({'app':'fujiya_device_sync','version':3,'syncKey':KEY,'expectedRevision':0,'deviceId':DEVICE,'deviceName':'selfrestore-test','userId':UID,'appVersion':'RC1.4.644-self-restore-cache-bust','records':records},separators=(',',':'))
+          rid='selfrestore_phase1_push_31240'; _,ps,d=post('device_sync_push_frame',{'payload':payload},rid,70)
+          if d.get('ok') is not True:d=poll('device_sync_status',rid)
+          print('PUSH|post_sec=%.3f|ok=%s|status=%s|code=%s|rev=%s'%(ps,d.get('ok'),d.get('status'),d.get('code'),d.get('revision')))
+          _,ls,lst=get('user_collection_restore_list',{'userId':UID,'syncKey':KEY,'recoveryToken':TOKEN,'limit':'10'},50)
+          print('LIST|sec=%.3f|ok=%s|current=%s|count=%s'%(ls,lst.get('ok'),lst.get('currentCount'),lst.get('count')))
+          print('TEST_UID|'+UID); print('TEST_KEY|'+KEY); print('TEST_TOKEN|'+TOKEN)
+          PY
