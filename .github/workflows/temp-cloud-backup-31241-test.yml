@@ -1,0 +1,107 @@
+name: TEMP verify GAS 3.12.41 cloud backup
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-cloud-backup-31241-test.yml'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Test live GAS cloud backup
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.parse, urllib.request, sys
+
+          URL='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+          APP='RC1.4.653-premium-cloud-backup'
+          USER='fujiya_test_cloud_31241_20260903'
+          KEY='mk_TESTCLOUD31241A2B3C4D5E6F7G8H9J0KLMN'
+          DEVICE='test_cloud_31241_device'
+
+          def get(params, timeout=60):
+              q=urllib.parse.urlencode(params)
+              with urllib.request.urlopen(URL+'?'+q, timeout=timeout) as r:
+                  return json.loads(r.read().decode('utf-8'))
+
+          def post(params, timeout=60):
+              data=urllib.parse.urlencode(params).encode('utf-8')
+              req=urllib.request.Request(URL, data=data, method='POST')
+              with urllib.request.urlopen(req, timeout=timeout) as r:
+                  return r.read().decode('utf-8', 'replace')
+
+          def push(expected, records, reqid):
+              payload={
+                  'app':'fujiya_device_sync','version':3,'syncKey':KEY,
+                  'expectedRevision':int(expected),'deviceId':DEVICE,'deviceName':'GAS 3.12.41 cloud test',
+                  'userId':USER,'appVersion':APP,'records':records
+              }
+              post({'action':'device_sync_push_frame','requestId':reqid,'appVersion':APP,'payload':json.dumps(payload,separators=(',',':'))}, 90)
+              last=None
+              for _ in range(30):
+                  time.sleep(1)
+                  last=get({'action':'device_sync_status','requestId':reqid},30)
+                  if not last.get('pending'):
+                      if last.get('ok') is not True:
+                          raise RuntimeError('push failed: '+json.dumps(last,ensure_ascii=False))
+                      return last
+              raise RuntimeError('push status timeout: '+json.dumps(last,ensure_ascii=False))
+
+          status=get({'action':'status'},60)
+          print('STATUS',json.dumps(status,ensure_ascii=False))
+          if status.get('version')!='3.12.41':
+              raise RuntimeError('live GAS version is not 3.12.41')
+
+          member=get({'action':'member_access','userId':USER,'appVersion':APP},60)
+          print('MEMBER',json.dumps(member,ensure_ascii=False))
+          if member.get('ok') is not True or member.get('access',{}).get('capabilities',{}).get('cloudBackup') is not True:
+              raise RuntimeError('synthetic tester has no cloudBackup capability')
+
+          initial=get({'action':'cloud_backup_pull','backupKey':KEY,'appVersion':APP},60)
+          print('INITIAL_PULL',json.dumps(initial,ensure_ascii=False))
+          rev=int(initial.get('revision') or 0)
+
+          now='2026-09-03T20:24:00+09:00'
+          backup={'app':'fujiya_collection','backupType':'full-json','versionLabel':'live-test-3.12.41','exportedAt':now,'entries':[{'id':'synthetic_game_A','title':'TEST ONLY'}],'settings':{'userId':USER}}
+          text=json.dumps(backup,separators=(',',':'),ensure_ascii=False)
+          checksum='live-test-checksum-'+str(len(text))
+          records=[
+              {'id':'__mitekore_cloud_full_backup_meta_v1__','updatedAt':now,'deletedAt':'','deviceId':DEVICE,
+               'data':{'kind':'cloud_full_backup_meta_v1','schema':1,'ownerUserId':USER,'exportedAt':now,'entryCount':1,'chunkCount':1,'charLength':len(text),'checksum':checksum,'backupType':'full-json','versionLabel':'live-test-3.12.41','emailHint':'te***@example.invalid'}},
+              {'id':'__mitekore_cloud_full_backup_chunk_v1__:00000','updatedAt':now,'deletedAt':'','deviceId':DEVICE,
+               'data':{'kind':'cloud_full_backup_chunk_v1','part':0,'total':1,'text':text}}
+          ]
+
+          saved=False
+          try:
+              p=push(rev,records,'cloud31241save20260903')
+              print('SAVE_STATUS',json.dumps(p,ensure_ascii=False))
+              saved=True
+              pulled=get({'action':'cloud_backup_pull','backupKey':KEY,'appVersion':APP},60)
+              print('PULL_AFTER_SAVE',json.dumps(pulled,ensure_ascii=False))
+              assert pulled.get('ok') is True
+              assert pulled.get('version')=='3.12.41'
+              assert pulled.get('exists') is True
+              assert int(pulled.get('record_count') or 0)==2
+              assert pulled.get('backup',{}).get('entryCount')==1
+              meta=[r for r in pulled.get('records',[]) if r.get('id')=='__mitekore_cloud_full_backup_meta_v1__'][0]
+              assert meta.get('data',{}).get('ownerUserId')==USER
+              rev=int(pulled.get('revision') or p.get('revision') or 0)
+              print('VERIFY_OK version=3.12.41 save=true pull=true revision='+str(rev))
+          finally:
+              try:
+                  cur=get({'action':'cloud_backup_pull','backupKey':KEY,'appVersion':APP},60)
+                  currev=int(cur.get('revision') or rev or 0)
+                  c=push(currev,[],'cloud31241cleanup20260903')
+                  print('CLEANUP_STATUS',json.dumps(c,ensure_ascii=False))
+                  after=get({'action':'cloud_backup_pull','backupKey':KEY,'appVersion':APP},60)
+                  print('PULL_AFTER_CLEANUP',json.dumps(after,ensure_ascii=False))
+                  if after.get('exists') is not False:
+                      raise RuntimeError('cloud test records remained after cleanup')
+              except Exception as e:
+                  print('CLEANUP_ERROR',repr(e))
+                  if saved:
+                      raise
+          PY
