@@ -1,0 +1,20 @@
+name: MiteKore 14659 Live Check
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-14659-livecheck.yml'
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check Netlify marker
+        run: |
+          python3 - <<'PY'
+          import urllib.request
+          u='https://hilarious-haupia-6e0406.netlify.app/?ct=14659-final'
+          s=urllib.request.urlopen(u,timeout=20).read().decode('utf-8','ignore')
+          print('HTML_LEN|'+str(len(s)))
+          print('MARKER_14659|'+str('RC1.4.644-self-restore-cache-bust' in s))
+          print('HAS_SELF_RESTORE|'+str('user_collection_restore_frame' in s))
+          PY
