@@ -1,0 +1,80 @@
+name: MiteKore 3.12.39 Self Restore Phase2
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-31239-selfrestore-phase2.yml'
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Preview restore pull and cleanup
+        shell: bash
+        run: |
+          python3 <<'PY'
+          import subprocess,urllib.parse,json,re,time
+          GAS='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+          UID='loadtest_selfrestore_31239_20260903_1603'
+          KEY='mk_SR31239_20260903_160300_ABCDEFGH'
+          TOKEN='rt_SR31239_20260903_160300_QWERTYUIOPASDFGH'
+          BACKUP='1nOjxkrT3OdMh_QT96xpmMR2Q_HPd6O1_FSdwnR-PN4U'
+          def curl(url,form=None,timeout=60):
+            cmd=['curl','-L','--connect-timeout','10','--max-time',str(timeout),'-sS','-w','\n__M__%{http_code}|%{time_total}']
+            if form:
+              for k,v in form.items():cmd+=['--data-urlencode',f'{k}={v}']
+            cmd+=[url];p=subprocess.run(cmd,text=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+            if p.returncode:return 0,float(timeout),p.stdout,{'error':p.stderr[:200]}
+            body,m=p.stdout.rsplit('\n__M__',1);code,sec=m.strip().split('|');return int(code),float(sec),body,{}
+          def get(action,params=None,timeout=60):
+            q=dict(params or {});q['action']=action;q['_']=str(time.time_ns());c,s,b,e=curl(GAS+'?'+urllib.parse.urlencode(q),timeout=timeout)
+            if e:return c,s,{'ok':False,'code':'TRANSPORT'}
+            try:return c,s,json.loads(b)
+            except:return c,s,{'ok':False,'code':'PARSE','body':b[:180]}
+          def parse_pm(b):
+            m=re.search(r'window\.parent\.postMessage\((\{.*?\}),\s*["\']\*["\']\)',b,re.S)
+            if m:
+              try:return json.loads(m.group(1)).get('payload') or {}
+              except:pass
+            return {'ok':False,'code':'PM_PARSE','body':b[:180]}
+          def post(action,fields,rid,timeout=90):
+            f={'action':action,'requestId':rid};f.update(fields);c,s,b,e=curl(GAS,f,timeout)
+            if e:return c,s,{'ok':False,'code':'TRANSPORT'}
+            return c,s,parse_pm(b)
+          def poll(action,rid,tries=12):
+            last={}
+            for _ in range(tries):
+              _,_,last=get(action,{'requestId':rid},45)
+              if last.get('status') in ('completed','error') or last.get('pending') is False:return last
+              time.sleep(.8)
+            return last
+          _,s,st=get('status');print('VERIFY|sec=%.3f|version=%s|ok=%s'%(s,st.get('version'),st.get('ok')))
+          _,bs,bad=get('user_collection_restore_list',{'userId':UID,'syncKey':KEY,'recoveryToken':'WRONG','limit':'7'},45)
+          print('WRONG_TOKEN|sec=%.3f|ok=%s|code=%s|msg=%s'%(bs,bad.get('ok'),bad.get('code'),str(bad.get('message'))[:120]))
+          _,ps,prev=get('user_collection_restore_preview',{'userId':UID,'syncKey':KEY,'recoveryToken':TOKEN,'backupFileId':BACKUP},60)
+          print('PREVIEW|sec=%.3f|ok=%s|available=%s|current=%s|backup=%s|diff=%s'%(ps,prev.get('ok'),prev.get('available'),prev.get('currentCount'),prev.get('backupCount'),prev.get('difference')))
+          # Wrong confirmation must fail without changing state.
+          rid_bad='selfrestore_wrong_confirm_31239'
+          _,ws,wrong=post('user_collection_restore_frame',{'userId':UID,'syncKey':KEY,'recoveryToken':TOKEN,'backupFileId':BACKUP,'confirmation':'WRONG'},rid_bad,70)
+          if wrong.get('status') not in ('completed','error'):wrong=poll('user_collection_restore_status',rid_bad)
+          print('WRONG_CONFIRM|sec=%.3f|ok=%s|status=%s|code=%s|msg=%s'%(ws,wrong.get('ok'),wrong.get('status'),wrong.get('code'),str(wrong.get('message'))[:120]))
+          _,_,before=get('device_sync_pull',{'syncKey':KEY,'version':'3','userId':UID},50)
+          active_before=[r.get('id') for r in (before.get('records') or []) if not r.get('deletedAt') and not str(r.get('id','')).startswith('__')]
+          print('BEFORE_RESTORE|revision=%s|active=%s'%(before.get('revision'),','.join(active_before)))
+          rid='selfrestore_real_31239'
+          _,rs,res=post('user_collection_restore_frame',{'userId':UID,'syncKey':KEY,'recoveryToken':TOKEN,'backupFileId':BACKUP,'confirmation':'RESTORE_MY_COLLECTION','appVersion':'RC1.4.643-self-collection-restore'},rid,100)
+          if res.get('status') not in ('completed','error'):res=poll('user_collection_restore_status',rid)
+          print('RESTORE|post_sec=%.3f|ok=%s|status=%s|code=%s|previous=%s|restored=%s|revision=%s|safety=%s'%(rs,res.get('ok'),res.get('status'),res.get('code'),res.get('previousCount'),res.get('restoredCount'),res.get('revision'),json.dumps(res.get('safetyBackup'),ensure_ascii=False,separators=(',',':'))))
+          _,pulls,after=get('device_sync_pull',{'syncKey':KEY,'version':'3','userId':UID},60)
+          rows=after.get('records') or []
+          active=[r.get('id') for r in rows if not r.get('deletedAt') and not str(r.get('id','')).startswith('__')]
+          tomb=[r.get('id') for r in rows if r.get('deletedAt') and not str(r.get('id','')).startswith('__')]
+          print('AFTER_PULL|sec=%.3f|ok=%s|revision=%s|active=%s|tomb=%s'%(pulls,after.get('ok'),after.get('revision'),','.join(active),','.join(tomb)))
+          _,p2s,p2=get('user_collection_restore_preview',{'userId':UID,'syncKey':KEY,'recoveryToken':TOKEN,'backupFileId':BACKUP},60)
+          print('PREVIEW_AFTER|sec=%.3f|ok=%s|current=%s|backup=%s|diff=%s'%(p2s,p2.get('ok'),p2.get('currentCount'),p2.get('backupCount'),p2.get('difference')))
+          # cleanup synthetic account/user data
+          crid='selfrestore_cleanup_31239'
+          _,cs,clean=post('account_delete_frame',{'confirm':'DELETE_ACCOUNT','userIds':json.dumps([UID],separators=(',',':'))},crid,180)
+          if clean.get('status') not in ('completed','error'):clean=poll('account_delete_status',crid,12)
+          print('CLEANUP|post_sec=%.3f|ok=%s|status=%s|deleted=%s|remaining=%s'%(cs,clean.get('ok'),clean.get('status'),clean.get('deleted_users'),clean.get('remaining_records')))
+          PY
