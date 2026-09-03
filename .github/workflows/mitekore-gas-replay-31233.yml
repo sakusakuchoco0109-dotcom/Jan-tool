@@ -1,0 +1,40 @@
+name: MiteKore GAS Replay 3.12.33
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-gas-replay-31233.yml'
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Verify deployed GAS baseline
+        shell: bash
+        run: |
+          set +e
+          GAS='https://script.google.com/macros/s/AKfycbxoqua0rvTXWabQSPYnJ9wvjYP8EZ0L5i-PlAwZclreciDwtmAS6dJeBXNjJrScqijm1A/exec'
+          for qs in \
+            'action=test' \
+            'action=device_sync_probe' \
+            'action=mitereco_ping' \
+            'action=deployment_diagnostics'; do
+            echo "BASELINE|$qs"
+            curl -L -sS --max-time 60 -w '\nMETRIC|HTTP=%{http_code}|TOTAL=%{time_total}|TTFB=%{time_starttransfer}|SIZE=%{size_download}\n' "$GAS?$qs&_=$(date +%s%N)" | head -c 4000
+            echo
+          done
+
+      - name: Replay previous remaining-route benchmark against 3.12.33
+        shell: bash
+        run: |
+          set -euo pipefail
+          HIST='https://raw.githubusercontent.com/sakusakuchoco0109-dotcom/Jan-tool/9c0bfa6f28bce91ea4c6935cb6e9d53551958a0c/.github/workflows/mitekore-gas-remaining-benchmark.yml'
+          OLD='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+          NEW='https://script.google.com/macros/s/AKfycbxoqua0rvTXWabQSPYnJ9wvjYP8EZ0L5i-PlAwZclreciDwtmAS6dJeBXNjJrScqijm1A/exec'
+          curl -fsSL "$HIST" -o /tmp/historical.yml
+          sed -i "s#${OLD}#${NEW}#g; s#APP='20.2.35.652'#APP='RC1.4.640-stall-resilience'#g" /tmp/historical.yml
+          awk 'p { sub(/^          /, ""); print } /run: \|/ { p=1; next }' /tmp/historical.yml > /tmp/replay.sh
+          chmod +x /tmp/replay.sh
+          echo 'REPLAY_SOURCE|commit=9c0bfa6f28bce91ea4c6935cb6e9d53551958a0c|target=3.12.33-new-deployment'
+          bash /tmp/replay.sh
