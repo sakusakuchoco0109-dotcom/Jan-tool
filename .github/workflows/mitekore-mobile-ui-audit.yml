@@ -1,0 +1,36 @@
+name: MiteKore Mobile UI Audit
+on:
+  push:
+    branches:
+      - 'audit/mobile-14698-20260904'
+    paths:
+      - 'mitekore-mobile-ui-audit.js'
+      - '.github/workflows/mitekore-mobile-ui-audit.yml'
+  workflow_dispatch:
+jobs:
+  mobile-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install browser
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+      - name: Audit mobile UI
+        run: node mitekore-mobile-ui-audit.js
+      - name: Upload mobile audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-mobile-ui-audit
+          path: |
+            mobile-ui-audit.json
+            mobile-ui-audit-summary.json
+            mobile-audit-*.json
+            mobile-audit-*.png
+            mobile-ui-audit-fatal.txt
