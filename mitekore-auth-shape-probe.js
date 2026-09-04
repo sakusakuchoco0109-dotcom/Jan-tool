@@ -7,9 +7,10 @@
   const u=`https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?${p}`;
   const r=await fetch(u,{redirect:'follow'});
   const text=await r.text();
-  const m=text.match(/^\s*probeCb\((.*)\)\s*;?\s*$/s);
-  if(!m) throw new Error('JSONP response not parseable');
-  const data=JSON.parse(m[1]);
+  console.log('GVIZ_HTTP '+r.status+' '+JSON.stringify(text.slice(0,320)));
+  const start=text.indexOf(cb+'('), end=text.lastIndexOf(');');
+  if(start<0||end<0) throw new Error('callback wrapper not found');
+  const data=JSON.parse(text.slice(start+cb.length+1,end));
   const row=data?.table?.rows?.[0]?.c||[];
   const cell=i=>String(row?.[i]?.v ?? row?.[i]?.f ?? '');
   const out={status:r.status,gvizStatus:data?.status,orderMatches:cell(0)===order,active:cell(1)==='有効',campaignPresent:!!cell(2),hasMaskedHint:cell(3).includes('•'),saltLength:cell(4).length,verifierLength:cell(5).length,iterations:Number(cell(6)||0)};
