@@ -19,5 +19,5 @@ const fs=require('fs');
       out.push({i,status:r.status,keys:Object.keys(data).sort(),action:data.action,ok:data.ok,authorized:data.authorized,version:data.version,message:String(data.message||'').slice(0,160),hasEmail:!!email});
     }catch(e){out.push({i,error:String(e&&e.message||e)})}
   }
-  console.log('PROBE_DIAG '+JSON.stringify(out));
+  console.log('PROBE_ALL_EMBEDDED '+JSON.stringify(out));
 })().catch(e=>{console.error(e);process.exit(1)});
