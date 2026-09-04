@@ -1,0 +1,41 @@
+name: MiteKore Mobile UI Audit Fast
+on:
+  push:
+    branches:
+      - 'audit/mobile-14698-20260904'
+    paths:
+      - '.github/workflows/mitekore-mobile-ui-audit-fast.yml'
+  workflow_dispatch:
+jobs:
+  mobile-audit-fast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare Playwright with runner Chrome
+        run: |
+          npm init -y
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm i playwright@1.48.2
+          CHROME=$(which google-chrome-stable || which google-chrome || which chromium || true)
+          test -n "$CHROME"
+          EXPECTED=$(node -e "const {chromium}=require('playwright');process.stdout.write(chromium.executablePath())")
+          mkdir -p "$(dirname "$EXPECTED")"
+          ln -sf "$CHROME" "$EXPECTED"
+          echo "Runner Chrome: $CHROME"
+          echo "Playwright path: $EXPECTED"
+      - name: Audit mobile UI
+        run: node mitekore-mobile-ui-audit.js
+      - name: Upload mobile audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-mobile-ui-audit-fast
+          path: |
+            mobile-ui-audit.json
+            mobile-ui-audit-summary.json
+            mobile-audit-*.json
+            mobile-audit-*.png
+            mobile-ui-audit-fatal.txt
