@@ -1,8 +1,6 @@
-const APP='https://hilarious-haupia-6e0406.netlify.app/';
+const fs=require('fs');
 (async()=>{
-  const html=await (await fetch(APP)).text();
-  const endpoints=[...new Set(html.match(/https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec/g)||[])];
-  if(!endpoints.length) throw new Error('endpoint not found');
+  const endpoints=fs.readFileSync('mitekore-auth-endpoints.txt','utf8').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);
   const out=[];
   for(let i=0;i<endpoints.length;i++){
     try{
@@ -16,5 +14,5 @@ const APP='https://hilarious-haupia-6e0406.netlify.app/';
       out.push({i,status:r.status,keys:Object.keys(data).sort(),ok:data.ok,authorized:data.authorized,hasEmail:!!email,emailIsDummy:email==='preview-probe@example.com'});
     }catch(e){out.push({i,error:String(e&&e.message||e)})}
   }
-  console.log('PROBE_ALL '+JSON.stringify(out));
+  console.log('PROBE_LOCAL '+JSON.stringify(out));
 })().catch(e=>{console.error(e);process.exit(1)});
