@@ -1,0 +1,16 @@
+name: MiteKore Auth Shape Probe
+on:
+  push:
+    branches:
+      - 'audit/mobile-14698-20260904'
+    paths:
+      - 'mitekore-auth-shape-probe.js'
+      - '.github/workflows/mitekore-auth-shape-probe.yml'
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: node mitekore-auth-shape-probe.js
