@@ -1,0 +1,32 @@
+name: MiteKore Mobile CDP Audit
+on:
+  push:
+    branches:
+      - 'audit/mobile-14698-20260904'
+    paths:
+      - 'mitekore-mobile-cdp-audit.js'
+      - '.github/workflows/mitekore-mobile-cdp-audit.yml'
+  workflow_dispatch:
+jobs:
+  mobile-cdp-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find runner Chrome
+        run: |
+          CHROME=$(which google-chrome-stable || which google-chrome || which chromium || true)
+          test -n "$CHROME"
+          echo "CHROME_BIN=$CHROME" >> "$GITHUB_ENV"
+          "$CHROME" --version
+      - name: Audit mobile UI with Chrome DevTools Protocol
+        run: node mitekore-mobile-cdp-audit.js
+      - name: Upload mobile audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-mobile-cdp-audit
+          path: |
+            mobile-cdp-*.json
+            mobile-cdp-*.png
+            mobile-cdp-fatal.txt
