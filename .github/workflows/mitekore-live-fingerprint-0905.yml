@@ -1,0 +1,32 @@
+name: MiteKore Live Fingerprint 0905
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-live-fingerprint-0905.yml'
+  workflow_dispatch:
+
+jobs:
+  fingerprint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect live HTML
+        env:
+          APP_URL: https://hilarious-haupia-6e0406.netlify.app/
+        run: |
+          set -e
+          curl -LfsS "$APP_URL" -o live.html
+          echo "BYTES=$(wc -c < live.html)"
+          echo "SHA256=$(sha256sum live.html | awk '{print $1}')"
+          for marker in \
+            '__FUJIYA_AUTHORITATIVE_PT_LIKE_14710__' \
+            '__FUJIYA_AUTHORITATIVE_PT_LIKE_14709__' \
+            '__FUJIYA_AUTHORITATIVE_PT_LIKE_14708__' \
+            'RC1.4.662-device-sync-timeout-fix' \
+            'dexSearchInput' \
+            'data-global-search-open596' \
+            'fujiyaRefreshMitekoreSharedFeed553f12'; do
+            if grep -Fq "$marker" live.html; then echo "MARKER $marker = YES"; else echo "MARKER $marker = NO"; fi
+          done
+          echo 'LIKE_MARKERS:'
+          grep -oE '__FUJIYA_[A-Z0-9_]*147[0-9]+__' live.html | sort -u | tail -50 || true
