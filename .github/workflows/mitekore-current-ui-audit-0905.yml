@@ -1,0 +1,59 @@
+name: MiteKore Current UI Audit 0905
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-current-ui-audit-0905.yml'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare browser
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+      - name: Run current UI audit
+        env:
+          APP_URL: https://hilarious-haupia-6e0406.netlify.app/
+          GAS_URL: https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec
+        run: |
+          node <<'NODE'
+          const {chromium}=require('playwright');const fs=require('fs');
+          const APP=process.env.APP_URL,GAS=process.env.GAS_URL,RUN=String(process.env.GITHUB_RUN_ID||Date.now());
+          const UID='fujiya_chatgpt_ui_'+RUN,NAME='ChatGPT UI確認_'+RUN.slice(-6),DRAFT='UI下書き確認 '+RUN.slice(-7);
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));const report={run:RUN,steps:[],errors:[],console:[]};
+          async function step(name,fn){const t=Date.now();try{const d=await fn();report.steps.push({name,ok:true,ms:Date.now()-t,detail:d??null});console.log('PASS',name,JSON.stringify(d??{}));return d}catch(e){const x={name,ok:false,ms:Date.now()-t,error:String(e&&e.stack||e)};report.steps.push(x);report.errors.push(x);console.error('FAIL',name,e);return null}}
+          async function dismiss(p){for(let n=0;n<3;n++)for(const s of ['[data-profile-unlock-close]','#rareBurstCloseBtn','.mike-talk-close','#tutorialCloseBtn','#firstRunCloseBtn','#devicePairCloseBtn','[data-mag-reader-close]','[data-mag-editor-close]','#cardDetailCloseBtn','#cardDetailClose','.detail-modal-close','[data-global-search-close596]']){try{const e=p.locator(s+':visible').first();if(await e.count())await e.click({force:true,timeout:500})}catch{}}}
+          async function init(ctx,name=NAME){await ctx.addInitScript(({uid,name,gas})=>{localStorage.setItem('fujiya_collection_user_id',uid);localStorage.setItem('fujiya_mitereco_identity_user_v2',uid);localStorage.setItem('fujiya_device_identity_owner_user_v1',uid);localStorage.setItem('fujiya_device_shared_canonical_user_v1',uid);localStorage.setItem('fujiya_collection_user_name',name);localStorage.setItem('fujiya_collection_profile_v20_1',JSON.stringify({name,bio:'UI総合確認',favoritePlatforms:[],favoriteGames:[],links:{},visibility:{}}));localStorage.setItem('fujiya_collection_setup_done_v1','1');localStorage.setItem('fujiya_collection_tutorial_seen_v2_rc1474','1');localStorage.setItem('fujiya_collection_first_run_seen_v20_2_35cn','1');localStorage.setItem('fujiya_collection_share_opt_in_v1','1');localStorage.setItem('fujiya_collection_gas_endpoint',gas);},{uid:UID,name,gas:GAS});}
+          async function pageFor(browser,mobile=false){const ctx=await browser.newContext(mobile?{viewport:{width:390,height:844},isMobile:true,hasTouch:true}:{viewport:{width:1440,height:1000}});await init(ctx,mobile?'ChatGPTスマホUI_'+RUN.slice(-6):NAME);const p=await ctx.newPage();p.setDefaultTimeout(18000);p.on('pageerror',e=>report.console.push({type:'pageerror',text:e.message}));p.on('console',m=>{if(['error','warning'].includes(m.type()))report.console.push({type:m.type(),text:m.text().slice(0,500)})});p.on('dialog',d=>d.accept().catch(()=>{}));await p.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});await sleep(6500);await dismiss(p);return p}
+          async function tab(p,t){await dismiss(p);const b=p.locator(`[data-ui-tab="${t}"]:visible`).first();if(!await b.count())throw new Error('main tab missing '+t);await b.click({force:true});await sleep(800);return p.evaluate(()=>document.body.dataset.activeTab||'')}
+          async function moreTab(p,t){await dismiss(p);const more=p.locator('[data-desktop-more]:visible').first();await more.click({force:true});await sleep(200);let b=p.locator(`[data-desktop-tab="${t}"]:visible`).first();if(!await b.count()&&t==='mitereco')b=p.locator('#desktopMoreMenu [data-mitereco-open]:visible').first();if(!await b.count())throw new Error('more tab missing '+t);await b.click({force:true});await sleep(900);return p.evaluate(()=>document.body.dataset.activeTab||'')}
+          (async()=>{const browser=await chromium.launch({headless:true});try{const p=await pageFor(browser,false);
+            await step('デスクトップ主要ナビ',async()=>{const o={};for(const t of ['register','list','dex','magazine'])o[t]=await tab(p,t);if(o.register!=='register'||o.list!=='list'||o.dex!=='dex'||o.magazine!=='magazine')throw new Error(JSON.stringify(o));return o});
+            await step('全体検索_MOTHER2候補',async()=>{await dismiss(p);await p.locator('[data-global-search-open596]:visible').first().click({force:true});const q=p.locator('#globalSearchInput596:visible');await q.fill('MOTHER2');await q.dispatchEvent('input');await p.waitForFunction(()=>document.querySelectorAll('#globalSearchCandidates596 [data-global-search-choice596]').length>0,undefined,{timeout:25000});const n=await p.locator('#globalSearchCandidates596 [data-global-search-choice596]').count();await p.locator('[data-global-search-close596]:visible').click({force:true});return {candidates:n}});
+            await step('図鑑検索と欲しい追加',async()=>{await tab(p,'dex');const q=p.locator('#dexSearch:visible');await q.fill('MOTHER2');await q.dispatchEvent('input');await p.waitForFunction(()=>document.body.innerText.includes('MOTHER2'),undefined,{timeout:25000});let card=p.locator('#dexGrid .dex-card').filter({hasText:'MOTHER2'}).first();if(!await card.count())card=p.locator('.dex-card').filter({hasText:'MOTHER2'}).first();if(!await card.count())throw new Error('MOTHER2 card missing');const w=card.locator('.dex-want-btn').first();if(!await w.count())throw new Error('want button missing');const before=(await w.innerText()).trim();if(!w.classList?.contains){}await w.click({force:true});await sleep(1000);return {before,after:(await w.innerText()).trim()}});
+            await step('欲しいものリスト表示',async()=>{let a=await moreTab(p,'buyback');if(a!=='buyback')throw new Error('active '+a);const hub=p.locator('#openWishlistListBtn:visible');if(!await hub.count())throw new Error('wishlist hub missing');await hub.click({force:true});await sleep(700);const text=await p.locator('#wishlistListBody').innerText();if(!text.includes('MOTHER2'))throw new Error('wishlist does not contain MOTHER2');return {found:true,count:await p.locator('#wishlistListCount').innerText()}});
+            await step('欲しい解除',async()=>{await tab(p,'dex');const q=p.locator('#dexSearch:visible');await q.fill('MOTHER2');await q.dispatchEvent('input');await sleep(1200);const w=p.locator('.dex-card').filter({hasText:'MOTHER2'}).first().locator('.dex-want-btn').first();if(!await w.count())throw new Error('want button missing on cleanup');await w.click({force:true});await sleep(700);return {after:(await w.innerText()).trim()}});
+            await step('みてトピ3表示',async()=>{await tab(p,'magazine');await p.waitForSelector('#miteMagazineContentTabs',{timeout:15000});const o={};for(const v of ['mitekore','articles','custom']){const b=p.locator(`[data-mag-view="${v}"]:visible`).first();if(!await b.count())throw new Error('mag view missing '+v);await b.click({force:true});await sleep(v==='custom'?1500:800);o[v]=true}return o});
+            await step('記事下書き_保存再開削除',async()=>{await tab(p,'magazine');const av=p.locator('[data-mag-view="articles"]:visible').first();if(await av.count())await av.click({force:true});await p.locator('[data-mag-write]:visible').click({force:true});await sleep(450);await p.locator('#miteMagazineTitle:visible').fill(DRAFT);let ta=p.locator('#miteMagazineBlockEditor [data-mag-block-field="text"]:visible').first();if(!await ta.count()){await p.locator('[data-mag-add-block="paragraph"]:visible').click({force:true});ta=p.locator('#miteMagazineBlockEditor [data-mag-block-field="text"]:visible').first()}await ta.fill('配布前の動作確認用下書き本文です。保存、再開、削除まで確認します。');await ta.dispatchEvent('input');await p.locator('[data-mag-save-draft]:visible').click({force:true});await sleep(700);await p.locator('[data-mag-editor-close]:visible').click({force:true});await sleep(400);const d=p.locator('#miteMagazineDrafts [data-mag-draft]').filter({hasText:DRAFT}).first();if(!await d.count())throw new Error('saved draft missing');await d.click({force:true});await sleep(450);if((await p.locator('#miteMagazineTitle:visible').inputValue())!==DRAFT)throw new Error('draft did not reopen');const del=p.locator('[data-mag-delete-draft]:visible');if(!await del.count())throw new Error('draft delete button missing');await del.click({force:true});await sleep(600);await dismiss(p);if(await p.locator('#miteMagazineDrafts [data-mag-draft]').filter({hasText:DRAFT}).count())throw new Error('draft remains');return {saved:true,reopened:true,deleted:true}});
+            await step('その他_データ同期設定',async()=>{const o={};for(const t of ['data','sync','manage'])o[t]=await moreTab(p,t);if(o.data!=='data'||o.sync!=='sync'||o.manage!=='manage')throw new Error(JSON.stringify(o));return o});
+            await step('その他_みてレコ表示',async()=>{const a=await moreTab(p,'mitereco');if(a!=='mitereco')throw new Error('active '+a);const panel=p.locator('#miteRecoPanel:visible');if(!await panel.count())throw new Error('miteReco panel missing');const text=(await panel.innerText()).slice(0,500);return {active:a,text}});
+            await step('その他_ショーケース導線',async()=>{await dismiss(p);await p.locator('[data-desktop-more]:visible').first().click({force:true});const b=p.locator('[data-desktop-shelf]:visible').first();if(!await b.count())throw new Error('shelf more button missing');await b.click({force:true});await sleep(650);const body=await p.locator('body').innerText();return {opened:body.includes('ショーケース')}});
+            const m=await pageFor(browser,true);
+            await step('スマホ下部ナビ',async()=>{const o={};const home=m.locator('[data-mobile-home-rc1498]:visible').first();o.home=!!await home.count();for(const t of ['register','list','dex']){const b=m.locator(`[data-mobile-tab="${t}"]:visible`).first();o[t]=!!await b.count();if(await b.count()){await b.click({force:true});await sleep(400)}}if(!o.home||!o.register||!o.list||!o.dex)throw new Error(JSON.stringify(o));return o});
+            await step('スマホその他メニュー',async()=>{const more=m.locator('[data-mobile-more]:visible').first();if(!await more.count())throw new Error('mobile more missing');await more.click({force:true});await sleep(250);const out={};for(const t of ['magazine','mitereco','data','sync','manage'])out[t]=!!await m.locator(`#mobileMoreSheet [data-mobile-tab="${t}"]:visible`).count();out.shelf=!!await m.locator('#mobileMoreSheet [data-mobile-shelf]:visible').count();out.search=!!await m.locator('#mobileMoreSheet [data-global-search-open596]:visible').count();if(Object.values(out).some(v=>!v))throw new Error(JSON.stringify(out));return out});
+          }finally{report.finishedAt=new Date().toISOString();fs.writeFileSync('current-ui-audit.json',JSON.stringify(report,null,2));console.log('UI_SUMMARY',JSON.stringify({passed:report.steps.filter(x=>x.ok).length,failed:report.steps.filter(x=>!x.ok).length,failedNames:report.steps.filter(x=>!x.ok).map(x=>x.name),console:report.console.slice(-20)}));await browser.close()}if(report.errors.length)process.exitCode=1})().catch(e=>{console.error(e.stack||e);report.fatal=String(e.stack||e);fs.writeFileSync('current-ui-audit.json',JSON.stringify(report,null,2));process.exit(1)});
+          NODE
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-current-ui-audit-0905
+          path: current-ui-audit.json
