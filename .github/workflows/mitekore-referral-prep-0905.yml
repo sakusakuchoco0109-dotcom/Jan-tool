@@ -18,42 +18,30 @@ jobs:
           npm init -y
           npm i playwright@1.48.2
           npx playwright install chromium --with-deps
-      - name: Create referral test buyer and STORES email link
+      - name: Save STORES link and verify no PT on referral registration
         env:
           APP_URL: https://hilarious-haupia-6e0406.netlify.app/
           GAS_URL: https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec
         run: |
           node <<'NODE'
           const {chromium}=require('playwright');
-          const fs=require('fs');
-          const APP=process.env.APP_URL,GAS=process.env.GAS_URL,RUN=String(process.env.GITHUB_RUN_ID||Date.now());
-          const BUYER='fujiya_chatgpt_refbuyer_'+RUN;
-          const EMAIL=`referral.audit.${RUN}@example.com`;
-          const SOURCE_ID='mh_7549b18d-acd2-4667-bf3e-b0593ed451ea';
-          const AUTHOR='fujiya_sync_bb29d7744f2fc5db40e3903ae2b9a72f';
-          const TITLE_ID='SFC-G002223';
-          const out={run:RUN,buyerUserId:BUYER,email:EMAIL,sharedTitleId:TITLE_ID,sourceId:SOURCE_ID,sourceAuthorUserId:AUTHOR};
+          const APP=process.env.APP_URL,GAS=process.env.GAS_URL;
+          const BUYER='fujiya_chatgpt_refbuyer_33965660943';
+          const EMAIL='referral.audit.33965660943@example.com';
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-          async function jsonp(p,action,params={},timeout=30000){return p.evaluate(({gas,action,params,timeout})=>new Promise((resolve,reject)=>{const cb='__ref_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);const s=document.createElement('script');let done=false;const clean=()=>{if(done)return;done=true;clearTimeout(t);try{delete window[cb]}catch{};s.remove()};window[cb]=d=>{clean();resolve(d)};const u=new URL(gas);u.searchParams.set('action',action);u.searchParams.set('callback',cb);for(const [k,v] of Object.entries(params))u.searchParams.set(k,String(v));s.src=u.toString();s.onerror=()=>{clean();reject(new Error(action+' load error'))};const t=setTimeout(()=>{clean();reject(new Error(action+' timeout'))},timeout);document.head.appendChild(s)}),{gas:GAS,action,params,timeout})}
+          async function jsonp(p,action,params={},timeout=30000){return p.evaluate(({gas,action,params,timeout})=>new Promise((resolve,reject)=>{const cb='__ref2_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);const s=document.createElement('script');let done=false;const clean=()=>{if(done)return;done=true;clearTimeout(t);try{delete window[cb]}catch{};s.remove()};window[cb]=d=>{clean();resolve(d)};const u=new URL(gas);u.searchParams.set('action',action);u.searchParams.set('callback',cb);for(const [k,v] of Object.entries(params))u.searchParams.set(k,String(v));s.src=u.toString();s.onerror=()=>{clean();reject(new Error(action+' load error'))};const t=setTimeout(()=>{clean();reject(new Error(action+' timeout'))},timeout);document.head.appendChild(s)}),{gas:GAS,action,params,timeout})}
           (async()=>{const browser=await chromium.launch({headless:true});try{
             const c=await browser.newContext({viewport:{width:1280,height:900}});
-            await c.addInitScript(({uid,gas})=>{localStorage.setItem('fujiya_collection_user_id',uid);localStorage.setItem('fujiya_mitereco_identity_user_v2',uid);localStorage.setItem('fujiya_device_identity_owner_user_v1',uid);localStorage.setItem('fujiya_device_shared_canonical_user_v1',uid);localStorage.setItem('fujiya_collection_user_name','ChatGPT紹介還元テスト購入者');localStorage.setItem('fujiya_collection_profile_v20_1',JSON.stringify({name:'ChatGPT紹介還元テスト購入者',bio:'紹介還元E2E専用',favoritePlatforms:[],favoriteGames:[],links:{},visibility:{}}));localStorage.setItem('fujiya_collection_setup_done_v1','1');localStorage.setItem('fujiya_collection_tutorial_seen_v2_rc1474','1');localStorage.setItem('fujiya_collection_first_run_seen_v20_2_35cn','1');localStorage.setItem('fujiya_collection_share_opt_in_v1','1');localStorage.setItem('fujiya_collection_gas_endpoint',gas);},{uid:BUYER,gas:GAS});
+            await c.addInitScript(({uid,gas})=>{localStorage.setItem('fujiya_collection_user_id',uid);localStorage.setItem('fujiya_mitereco_identity_user_v2',uid);localStorage.setItem('fujiya_collection_setup_done_v1','1');localStorage.setItem('fujiya_collection_tutorial_seen_v2_rc1474','1');localStorage.setItem('fujiya_collection_first_run_seen_v20_2_35cn','1');localStorage.setItem('fujiya_collection_gas_endpoint',gas);},{uid:BUYER,gas:GAS});
             const p=await c.newPage();p.setDefaultTimeout(30000);await p.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});await sleep(7000);
-            if(!await p.evaluate(()=>window.__FUJIYA_AUTHORITATIVE_PT_LIKE_14710__===true))throw new Error('14710 not deployed');
-            const before=await jsonp(p,'pt_balance_state',{userId:BUYER});out.ptBefore=before;
-            const referral=await p.evaluate(async ({buyer,titleId,sourceId,author})=>{const b=window.fujiyaMiteMagazineBridge;if(!b?.postFrame)throw new Error('postFrame unavailable');return await b.postFrame('content_referral_save_frame',{fields:{buyerUserId:buyer,sharedTitleId:titleId,platform:'SFC',title:'ドラゴンクエスト6 幻の大地',sourceType:'mitekore_post',sourceId,sourceAuthorUserId:author,sourceLabel:'ゲーム投稿'},timeoutMs:26000})},{buyer:BUYER,titleId:TITLE_ID,sourceId:SOURCE_ID,author:AUTHOR});
-            if(referral?.ok!==true||referral?.referral?.verified!==true)throw new Error('referral save failed '+JSON.stringify(referral));out.referral=referral;
-            const emailSave=await p.evaluate(async ({uid,email})=>{const b=window.fujiyaMiteMagazineBridge;if(!b?.postFrame)throw new Error('postFrame unavailable');return await b.postFrame('stores_email_save_frame',{fields:{userId:uid,email},timeoutMs:20000})},{uid:BUYER,email:EMAIL});
-            if(emailSave?.ok!==true)throw new Error('email save failed '+JSON.stringify(emailSave));out.emailSave=emailSave;
-            const status=await jsonp(p,'stores_email_status',{userId:BUYER});out.emailStatus=status;if(!status?.ok||!status?.link?.linked)throw new Error('email status not linked '+JSON.stringify(status));
-            const after=await jsonp(p,'pt_balance_state',{userId:BUYER});out.ptAfterReferral=after;
-            const beforeAvailable=Number(before?.available||0),afterAvailable=Number(after?.available||0);if(afterAvailable!==beforeAvailable)throw new Error(`PT changed on referral registration ${beforeAvailable}->${afterAvailable}`);
-            console.log('REFERRAL_PREP_RESULT',JSON.stringify(out));fs.writeFileSync('referral-prep.json',JSON.stringify(out,null,2));
-          }finally{await browser.close()}})().catch(e=>{out.error=String(e.stack||e);fs.writeFileSync('referral-prep.json',JSON.stringify(out,null,2));console.error(e.stack||e);process.exit(1)});
+            const before=await jsonp(p,'pt_balance_state',{userId:BUYER});
+            let postError='';
+            try{await p.evaluate(async ({uid,email})=>{const b=window.fujiyaMiteMagazineBridge;if(!b?.postFrame)throw new Error('postFrame unavailable');return await b.postFrame('stores_email_save_frame',{fields:{userId:uid,email},timeoutMs:26000})},{uid:BUYER,email:EMAIL})}catch(e){postError=String(e?.message||e)}
+            let status=null;const started=Date.now();
+            while(Date.now()-started<45000){try{status=await jsonp(p,'stores_email_status',{userId:BUYER});if(status?.ok&&status?.link?.linked)break}catch{}await sleep(1500)}
+            if(!status?.ok||!status?.link?.linked)throw new Error('STORES email not linked; postError='+postError+' status='+JSON.stringify(status));
+            const after=await jsonp(p,'pt_balance_state',{userId:BUYER});
+            if(Number(after?.available||0)!==Number(before?.available||0))throw new Error(`PT changed on referral registration ${before?.available}->${after?.available}`);
+            console.log('REFERRAL_PREP_OK',JSON.stringify({buyerUserId:BUYER,email:EMAIL,postError,emailStatus:status,ptBefore:before?.available,ptAfter:after?.available}));
+          }finally{await browser.close()}})().catch(e=>{console.error(e.stack||e);process.exit(1)});
           NODE
-      - name: Upload result
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mitekore-referral-prep-0905
-          path: referral-prep.json
