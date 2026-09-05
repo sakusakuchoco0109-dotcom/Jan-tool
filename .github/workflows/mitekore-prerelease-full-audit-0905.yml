@@ -1,0 +1,61 @@
+name: MiteKore PreRelease Full Audit 0905
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-prerelease-full-audit-0905.yml'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare Playwright
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+      - name: Adapt existing full audit to current identities
+        env:
+          GAS_URL: https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path('mitekore-full-functional-audit.js')
+          s=p.read_text()
+          run=os.environ.get('GITHUB_RUN_ID','0905')
+          short=run[-7:]
+          s=s.replace("const PRIMARY='ChatGPT総合検証0814';",f"const PRIMARY='ChatGPT総合検証0905_{short}';")
+          s=s.replace("const PARTICIPANT='ChatGPT参加者0814';",f"const PARTICIPANT='ChatGPT参加者0905_{short}';")
+          s=s.replace("const COMP='ChatGPT総合検証0814 タイムアタック';",f"const COMP='ChatGPT総合検証0905_{short} タイムアタック';")
+          s=s.replace("const ARTICLE='ChatGPT総合検証0814 動作確認';",f"const ARTICLE='ChatGPT総合検証0905_{short} 動作確認';")
+          s=s.replace('ChatGPT総合検証0814','ChatGPT総合検証0905')
+          s=s.replace('ChatGPT_Test_0814','ChatGPT_Test_0905')
+          old="localStorage.setItem('fujiya_mitekore_early_access_v2',JSON.stringify({orderNumber:'99999999',verifiedAt:Date.now(),campaign:'full-functional-audit'}));"
+          gas=os.environ['GAS_URL']
+          new=("const uid='fujiya_chatgpt_audit_'+String(name||'user').replace(/[^A-Za-z0-9_\\-]/g,'_')+'_'+"+repr(short)+";"
+               "localStorage.setItem('fujiya_collection_user_id',uid);"
+               "localStorage.setItem('fujiya_mitereco_identity_user_v2',uid);"
+               "localStorage.setItem('fujiya_device_identity_owner_user_v1',uid);"
+               "localStorage.setItem('fujiya_device_shared_canonical_user_v1',uid);"
+               "localStorage.setItem('fujiya_collection_gas_endpoint',"+repr(gas)+");")
+          if old not in s: raise SystemExit('identity patch target missing')
+          s=s.replace(old,new)
+          Path('mitekore-prerelease-full-audit-current.js').write_text(s)
+          PY
+          node --check mitekore-prerelease-full-audit-current.js
+      - name: Run full real-browser audit
+        run: node mitekore-prerelease-full-audit-current.js
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-prerelease-full-audit-0905
+          path: |
+            functional-audit-result.json
+            audit-*.png
