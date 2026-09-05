@@ -1,4 +1,4 @@
-name: MiteKore Referral Prep 0905
+name: MiteKore Coupon Adjustment Test 0906
 on:
   push:
     paths:
@@ -6,42 +6,30 @@ on:
   workflow_dispatch:
 
 jobs:
-  prep:
+  test:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 3
     steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Prepare browser
-        run: |
-          npm init -y
-          npm i playwright@1.48.2
-          npx playwright install chromium --with-deps
-      - name: Save STORES link and verify no PT on referral registration
+      - name: Exchange 500 PT for test coupon
         env:
-          APP_URL: https://hilarious-haupia-6e0406.netlify.app/
           GAS_URL: https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec
         run: |
-          node <<'NODE'
-          const {chromium}=require('playwright');
-          const APP=process.env.APP_URL,GAS=process.env.GAS_URL;
-          const BUYER='fujiya_chatgpt_refbuyer_33965660943';
-          const EMAIL='referral.audit.33965660943@example.com';
-          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-          async function jsonp(p,action,params={},timeout=30000){return p.evaluate(({gas,action,params,timeout})=>new Promise((resolve,reject)=>{const cb='__ref2_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);const s=document.createElement('script');let done=false;const clean=()=>{if(done)return;done=true;clearTimeout(t);try{delete window[cb]}catch{};s.remove()};window[cb]=d=>{clean();resolve(d)};const u=new URL(gas);u.searchParams.set('action',action);u.searchParams.set('callback',cb);for(const [k,v] of Object.entries(params))u.searchParams.set(k,String(v));s.src=u.toString();s.onerror=()=>{clean();reject(new Error(action+' load error'))};const t=setTimeout(()=>{clean();reject(new Error(action+' timeout'))},timeout);document.head.appendChild(s)}),{gas:GAS,action,params,timeout})}
-          (async()=>{const browser=await chromium.launch({headless:true});try{
-            const c=await browser.newContext({viewport:{width:1280,height:900}});
-            await c.addInitScript(({uid,gas})=>{localStorage.setItem('fujiya_collection_user_id',uid);localStorage.setItem('fujiya_mitereco_identity_user_v2',uid);localStorage.setItem('fujiya_collection_setup_done_v1','1');localStorage.setItem('fujiya_collection_tutorial_seen_v2_rc1474','1');localStorage.setItem('fujiya_collection_first_run_seen_v20_2_35cn','1');localStorage.setItem('fujiya_collection_gas_endpoint',gas);},{uid:BUYER,gas:GAS});
-            const p=await c.newPage();p.setDefaultTimeout(30000);await p.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});await sleep(7000);
-            const before=await jsonp(p,'pt_balance_state',{userId:BUYER});
-            let postError='';
-            try{await p.evaluate(async ({uid,email})=>{const b=window.fujiyaMiteMagazineBridge;if(!b?.postFrame)throw new Error('postFrame unavailable');return await b.postFrame('stores_email_save_frame',{fields:{userId:uid,email},timeoutMs:26000})},{uid:BUYER,email:EMAIL})}catch(e){postError=String(e?.message||e)}
-            let status=null;const started=Date.now();
-            while(Date.now()-started<45000){try{status=await jsonp(p,'stores_email_status',{userId:BUYER});if(status?.ok&&status?.link?.linked)break}catch{}await sleep(1500)}
-            if(!status?.ok||!status?.link?.linked)throw new Error('STORES email not linked; postError='+postError+' status='+JSON.stringify(status));
-            const after=await jsonp(p,'pt_balance_state',{userId:BUYER});
-            if(Number(after?.available||0)!==Number(before?.available||0))throw new Error(`PT changed on referral registration ${before?.available}->${after?.available}`);
-            console.log('REFERRAL_PREP_OK',JSON.stringify({buyerUserId:BUYER,email:EMAIL,postError,emailStatus:status,ptBefore:before?.available,ptAfter:after?.available}));
-          }finally{await browser.close()}})().catch(e=>{console.error(e.stack||e);process.exit(1)});
-          NODE
+          set -euo pipefail
+          BUYER='fujiya_chatgpt_refbuyer_33965660943'
+          RID='TEST-COUPON-0906-500PT'
+          MONTH='2026-09'
+          BEFORE=$(curl -fsSL --get "$GAS_URL" --data-urlencode 'action=pt_balance_state' --data-urlencode "userId=$BUYER")
+          echo "BEFORE=$BEFORE"
+          curl -fsSL -X POST "$GAS_URL" \
+            --data-urlencode 'action=pt_coupon_request_frame' \
+            --data-urlencode "requestId=$RID" \
+            --data-urlencode "requestIdValue=$RID" \
+            --data-urlencode "couponRequestId=$RID" \
+            --data-urlencode "userId=$BUYER" \
+            --data-urlencode "month=$MONTH" \
+            --data-urlencode 'clientAvailablePt=500' \
+            --data-urlencode 'clientGrossPt=500' > /tmp/coupon_post.html
+          sleep 3
+          AFTER=$(curl -fsSL --get "$GAS_URL" --data-urlencode 'action=pt_balance_state' --data-urlencode "userId=$BUYER")
+          echo "AFTER=$AFTER"
+          node -e 'const d=JSON.parse(process.argv[1]); if(Number(d.couponSpent)!==500||Number(d.available)!==0) throw new Error("coupon spend not reflected: "+process.argv[1]); console.log("COUPON_SPEND_OK",JSON.stringify({couponSpent:d.couponSpent,available:d.available,spentTotal:d.spentTotal,earnedTotal:d.earnedTotal}))' "$AFTER"
