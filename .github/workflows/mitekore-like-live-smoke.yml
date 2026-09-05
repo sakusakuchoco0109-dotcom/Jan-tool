@@ -38,22 +38,31 @@ jobs:
           async function gasGet(url, params={}) {
             const u = new URL(url);
             for (const [k,v] of Object.entries(params)) u.searchParams.set(k, String(v));
-            const r = await fetch(u, {redirect:'follow'});
-            const text = await r.text();
-            let json=null; try{json=JSON.parse(text)}catch(_){}
-            return {ok:r.ok,status:r.status,text:text.slice(0,500),json};
+            const ac=new AbortController(); const t=setTimeout(()=>ac.abort(),8000);
+            try{
+              const r = await fetch(u, {redirect:'follow',signal:ac.signal});
+              const text = await r.text();
+              let json=null; try{json=JSON.parse(text)}catch(_){}
+              return {ok:r.ok,status:r.status,text:text.slice(0,500),json};
+            }finally{clearTimeout(t)}
+          }
+          function semverScore(v){
+            const m=String(v||'').match(/(?:^|v)(\d+)\.(\d+)\.(\d+)/i);if(!m)return 0;
+            return Number(m[1])*1000000+Number(m[2])*1000+Number(m[3]);
           }
           async function chooseGas(){
-            const out=[];
+            const checks=[];
             for(const url of GAS_CANDIDATES){
               try{
                 const r=await gasGet(url,{action:'status'});
                 const version=String(r.json?.version||r.json?.gasVersion||'');
-                out.push({url,version,status:r.status});
-                if(r.ok && r.json) return {url,version,checks:out};
-              }catch(e){out.push({url,error:String(e)})}
+                checks.push({url,version,status:r.status,score:semverScore(version)});
+              }catch(e){checks.push({url,error:String(e),score:0})}
             }
-            throw new Error('GAS endpoint unavailable '+JSON.stringify(out));
+            checks.sort((a,b)=>(b.score||0)-(a.score||0));
+            const best=checks.find(x=>/^v?3\.12\./i.test(String(x.version||''))) || checks.find(x=>x.score>0);
+            if(!best)throw new Error('GAS endpoint unavailable '+JSON.stringify(checks));
+            return {url:best.url,version:best.version,checks};
           }
           async function dismiss(page){
             for(const sel of ['[data-profile-unlock-close]','#rareBurstCloseBtn','.mike-talk-close','#tutorialCloseBtn','#firstRunCloseBtn','#devicePairCloseBtn']){
@@ -63,6 +72,7 @@ jobs:
           (async()=>{
             const gas=await chooseGas();
             console.log('GAS_SELECTED', gas.url, gas.version, JSON.stringify(gas.checks));
+            if(!/^v?3\.12\./i.test(gas.version))throw new Error('3.12系GASが見つからない '+JSON.stringify(gas.checks));
             const browser=await chromium.launch({headless:true});
             const ctx=await browser.newContext({viewport:{width:1440,height:1100}});
             await ctx.addInitScript(({TEST_USER,gasUrl})=>{
@@ -82,6 +92,8 @@ jobs:
             page.on('pageerror',e=>logs.push(`PAGEERROR: ${e.message}`));
             await page.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});
             await sleep(7000); await dismiss(page);
+            const appInfo=await page.evaluate(()=>({clientVersion:String(window.__FUJIYA_CLIENT_APP_VERSION__||''),defaultGas:String(window.DEFAULT_GAS_ENDPOINT||''),activeGas:String(localStorage.getItem('fujiya_collection_gas_endpoint')||'')}));
+            console.log('APP_INFO',JSON.stringify(appInfo));
             const mag=page.locator('[data-ui-tab="magazine"]:visible').first();
             if(!await mag.count()) throw new Error('みてトピタブが見つからない');
             await mag.click({force:true}); await sleep(1800); await dismiss(page);
@@ -94,12 +106,12 @@ jobs:
             await like.waitFor({state:'visible',timeout:20000});
             const before={count:await like.locator('.fujiya-cross-like-count').textContent(),cls:await like.getAttribute('class'),pressed:await like.getAttribute('aria-pressed')};
             await like.click({force:true});
-            await sleep(6000);
+            await sleep(8000);
             const after={count:await like.locator('.fujiya-cross-like-count').textContent(),cls:await like.getAttribute('class'),pressed:await like.getAttribute('aria-pressed')};
             await page.screenshot({path:'like-smoke.png',fullPage:false});
             const state=await gasGet(gas.url,{action:'pt_like_state',userId:TEST_USER,postKeys:POST_KEY});
             const row=state.json?.likes?.[0]||null;
-            const result={TEST_USER,POST_KEY,title:TITLE_NEEDLE,gasVersion:gas.version,before,after,server:row,logs:logs.slice(-80)};
+            const result={TEST_USER,POST_KEY,title:TITLE_NEEDLE,gasVersion:gas.version,appInfo,before,after,server:row,logs:logs.slice(-100)};
             fs.writeFileSync('like-smoke-result.json',JSON.stringify(result,null,2));
             console.log('LIKE_SMOKE_RESULT',JSON.stringify(result));
             if(!row?.liked) throw new Error('UIクリック後もGASで liked=true になっていない '+JSON.stringify(row));
