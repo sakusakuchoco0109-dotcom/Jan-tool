@@ -1,0 +1,55 @@
+name: MiteKore Postdeploy 14710 Audit
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-postdeploy-14710-audit.yml'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare browser
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+      - name: Verify deployed 14710 and remaining flows
+        env:
+          APP_URL: https://hilarious-haupia-6e0406.netlify.app/
+          GAS_URL: https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec
+        run: |
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          const fs=require('fs');
+          const APP=process.env.APP_URL,GAS=process.env.GAS_URL,RUN=String(process.env.GITHUB_RUN_ID||Date.now());
+          const UID='fujiya_chatgpt_postdeploy_'+RUN;
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          const report={run:RUN,steps:[],console:[]};
+          async function step(name,fn){const t=Date.now();try{const d=await fn();const r={name,ok:true,ms:Date.now()-t,detail:d??null};report.steps.push(r);console.log('PASS',name,JSON.stringify(r));return d}catch(e){const r={name,ok:false,ms:Date.now()-t,error:String(e?.stack||e)};report.steps.push(r);console.error('FAIL',name,JSON.stringify(r));return null}}
+          async function dismiss(p){for(const s of ['[data-profile-unlock-close]','#rareBurstCloseBtn','.mike-talk-close','#tutorialCloseBtn','#firstRunCloseBtn','#devicePairCloseBtn','[data-mag-reader-close]','[data-mag-editor-close]','#cardDetailCloseBtn','#cardDetailClose','.detail-modal-close','[data-global-search-close596]']){try{const x=p.locator(s+':visible').first();if(await x.count())await x.click({force:true,timeout:500})}catch{}}}
+          async function init(ctx,name){await ctx.addInitScript(({uid,name,gas})=>{localStorage.setItem('fujiya_collection_user_id',uid);localStorage.setItem('fujiya_mitereco_identity_user_v2',uid);localStorage.setItem('fujiya_device_identity_owner_user_v1',uid);localStorage.setItem('fujiya_device_shared_canonical_user_v1',uid);localStorage.setItem('fujiya_collection_user_name',name);localStorage.setItem('fujiya_collection_profile_v20_1',JSON.stringify({name,bio:'14710配布後確認',favoritePlatforms:[],favoriteGames:[],links:{},visibility:{}}));localStorage.setItem('fujiya_collection_setup_done_v1','1');localStorage.setItem('fujiya_collection_tutorial_seen_v2_rc1474','1');localStorage.setItem('fujiya_collection_first_run_seen_v20_2_35cn','1');localStorage.setItem('fujiya_collection_share_opt_in_v1','1');localStorage.setItem('fujiya_collection_gas_endpoint',gas);},{uid,name,gas:GAS});}
+          async function make(browser,mobile=false){const c=await browser.newContext(mobile?{viewport:{width:390,height:844},isMobile:true,hasTouch:true}:{viewport:{width:1440,height:1000}});await init(c,mobile?'ChatGPTスマホ14710':'ChatGPT14710確認');const p=await c.newPage();p.setDefaultTimeout(30000);p.on('dialog',d=>d.accept().catch(()=>{}));p.on('console',m=>{if(['error','warning'].includes(m.type()))report.console.push({type:m.type(),text:m.text().slice(0,700)})});p.on('pageerror',e=>report.console.push({type:'pageerror',text:e.message}));await p.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});await sleep(7000);await dismiss(p);return p}
+          async function tab(p,t){await dismiss(p);const b=p.locator(`[data-ui-tab="${t}"]:visible`).first();if(!await b.count())throw new Error('main tab missing '+t);await b.click({force:true});await sleep(600)}
+          async function waitMaster(p,timeout=240000){const t=Date.now();await p.evaluate(()=>window.fujiyaEnsureTitleMaster?.('postdeploy-audit',{showOverlay:false,allowFullFetch:true}));while(Date.now()-t<timeout){const s=await p.evaluate(()=>({ready:!!window.fujiyaTitleMasterReady?.(),count:Array.isArray(window.MASTER_TITLES)?window.MASTER_TITLES.length:0,progress:window.fujiyaGetTitleMasterProgress?.(),err:window.fujiyaGetTitleMasterLastError?.()}));if(s.ready)return {...s,ms:Date.now()-t};if(s.err)throw new Error('master '+JSON.stringify(s));await sleep(1200)}throw new Error('TITLE_MASTER timeout')}
+          (async()=>{const browser=await chromium.launch({headless:true});try{
+            const p=await make(browser,false);
+            await step('14710公開反映',async()=>{const x=await p.evaluate(()=>({marker:window.__FUJIYA_AUTHORITATIVE_PT_LIKE_14710__===true,old14707:window.__FUJIYA_AUTHORITATIVE_PT_LIKE_14707__===true,version:String(window.__FUJIYA_CLIENT_APP_VERSION__||''),dex:!!document.querySelector('#dexSearchInput')}));if(!x.marker)throw new Error(JSON.stringify(x));return x});
+            await step('初回図鑑DB準備',async()=>{await tab(p,'dex');return await waitMaster(p)});
+            await step('全体検索_MOTHER2',async()=>{await p.locator('[data-global-search-open596]:visible').first().click({force:true});const q=p.locator('#globalSearchInput596:visible');await q.fill('MOTHER2');await q.dispatchEvent('input');await p.waitForFunction(()=>document.querySelectorAll('#globalSearchCandidates596 [data-global-search-choice596]').length>0,undefined,{timeout:30000});const n=await p.locator('#globalSearchCandidates596 [data-global-search-choice596]').count();const note=await p.locator('#globalSearchNote596').innerText();await p.locator('[data-global-search-close596]:visible').click({force:true});return {candidates:n,note}});
+            await step('図鑑検索_MOTHER2',async()=>{await tab(p,'dex');const q=p.locator('#dexSearchInput:visible');await q.fill('MOTHER2');await q.dispatchEvent('input');await p.waitForFunction(()=>[...document.querySelectorAll('.dex-card')].some(x=>/MOTHER2/i.test(x.innerText)),undefined,{timeout:30000});const card=p.locator('.dex-card').filter({hasText:'MOTHER2'}).first();return {cards:await p.locator('.dex-card').filter({hasText:'MOTHER2'}).count(),wantText:(await card.locator('[data-dex-wishlist]').first().innerText()).trim()}});
+            await step('欲しい追加_リスト表示_解除',async()=>{let card=p.locator('.dex-card').filter({hasText:'MOTHER2'}).first();let w=card.locator('[data-dex-wishlist]').first();if(!await w.count())throw new Error('want button missing');if((await w.innerText()).includes('解除')){await w.click({force:true});await sleep(500);card=p.locator('.dex-card').filter({hasText:'MOTHER2'}).first();w=card.locator('[data-dex-wishlist]').first()}await w.click({force:true});await sleep(700);await dismiss(p);const more=p.locator('[data-desktop-more]:visible').first();await more.click({force:true});await sleep(250);const bb=p.locator('#desktopMoreMenu [data-desktop-tab="buyback"]:visible').first();if(!await bb.count())throw new Error('buyback menu missing');await bb.click({force:true});await sleep(600);const hub=p.locator('#openWishlistListBtn:visible');if(!await hub.count())throw new Error('wishlist hub missing');await hub.click({force:true});await sleep(600);const body=await p.locator('#wishlistListBody').innerText();if(!/MOTHER2/i.test(body))throw new Error('wishlist missing MOTHER2');await dismiss(p);await tab(p,'dex');const q=p.locator('#dexSearchInput:visible');await q.fill('MOTHER2');await q.dispatchEvent('input');await sleep(700);const rm=p.locator('.dex-card').filter({hasText:'MOTHER2'}).first().locator('[data-dex-wishlist]').first();if(!await rm.count()||!(await rm.innerText()).includes('解除'))throw new Error('want state not active');await rm.click({force:true});await sleep(500);return {listed:true,removed:!(await p.locator('.dex-card').filter({hasText:'MOTHER2'}).first().locator('[data-dex-wishlist]').first().innerText()).includes('解除')}});
+            const m=await make(browser,true);
+            await step('スマホ_その他_全体検索を開く',async()=>{const more=m.locator('[data-mobile-more]:visible').first();if(!await more.count())throw new Error('mobile more missing');await more.click({force:true});await sleep(350);const exists=await m.locator('#mobileMoreSheet [data-global-search-open596]').count();const vis=await m.locator('#mobileMoreSheet [data-global-search-open596]:visible').count();if(!exists||!vis)throw new Error('mobile global search missing '+JSON.stringify({exists,vis}));await m.locator('#mobileMoreSheet [data-global-search-open596]:visible').click({force:true});await sleep(250);const input=m.locator('#globalSearchInput596:visible');if(!await input.count())throw new Error('global search modal did not open');return {exists,visible:vis,modal:true}});
+          }finally{report.finishedAt=new Date().toISOString();fs.writeFileSync('postdeploy-14710-audit.json',JSON.stringify(report,null,2));console.log('SUMMARY',JSON.stringify({passed:report.steps.filter(x=>x.ok).length,failed:report.steps.filter(x=>!x.ok).length,steps:report.steps,console:report.console.slice(-20)}));await browser.close()}if(report.steps.some(x=>!x.ok))process.exitCode=1})().catch(e=>{report.fatal=String(e.stack||e);fs.writeFileSync('postdeploy-14710-audit.json',JSON.stringify(report,null,2));console.error(e.stack||e);process.exit(1)});
+          NODE
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-postdeploy-14710-audit
+          path: postdeploy-14710-audit.json
