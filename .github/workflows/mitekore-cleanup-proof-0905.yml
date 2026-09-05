@@ -1,0 +1,53 @@
+name: MiteKore Cleanup Proof 0905
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-cleanup-proof-0905.yml'
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare Playwright
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+      - name: Delete test comment and post through current UI
+        env:
+          APP_URL: https://hilarious-haupia-6e0406.netlify.app/
+          GAS_URL: https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec
+        run: |
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          const APP=process.env.APP_URL,GAS=process.env.GAS_URL;
+          const RUN='33961284790';
+          const A='fujiya_chatgpt_critical_A_'+RUN,B='fujiya_chatgpt_critical_B_'+RUN;
+          const NAME_A='ChatGPT総合確認A_284790',NAME_B='ChatGPT総合確認B_284790';
+          const POST_TEXT='配布前総合確認 61284790',COMMENT='コメント動作確認 61284790';
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          async function dismiss(p){for(const s of ['[data-profile-unlock-close]','#rareBurstCloseBtn','.mike-talk-close','#tutorialCloseBtn','#firstRunCloseBtn','#devicePairCloseBtn','[data-mag-reader-close]','[data-mag-editor-close]','#cardDetailCloseBtn','.detail-modal-close']){try{const e=p.locator(s+':visible').first();if(await e.count())await e.click({force:true,timeout:700})}catch{}}}
+          async function make(browser,uid,name){const c=await browser.newContext({viewport:{width:1440,height:1000}});await c.addInitScript(({uid,name,gas})=>{localStorage.setItem('fujiya_collection_user_id',uid);localStorage.setItem('fujiya_mitereco_identity_user_v2',uid);localStorage.setItem('fujiya_device_identity_owner_user_v1',uid);localStorage.setItem('fujiya_device_shared_canonical_user_v1',uid);localStorage.setItem('fujiya_collection_user_name',name);localStorage.setItem('fujiya_collection_profile_v20_1',JSON.stringify({name,bio:'配布前総合確認テスト',favoritePlatforms:[],favoriteGames:[],links:{},visibility:{}}));localStorage.setItem('fujiya_collection_setup_done_v1','1');localStorage.setItem('fujiya_collection_tutorial_seen_v2_rc1474','1');localStorage.setItem('fujiya_collection_first_run_seen_v20_2_35cn','1');localStorage.setItem('fujiya_collection_share_opt_in_v1','1');localStorage.setItem('fujiya_collection_gas_endpoint',gas);},{uid,name,gas:GAS});const p=await c.newPage();p.setDefaultTimeout(18000);p.on('dialog',d=>d.accept().catch(()=>{}));await p.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});await sleep(6500);await dismiss(p);return p}
+          async function openFeed(p){await dismiss(p);const m=p.locator('[data-ui-tab="magazine"]:visible').first();await m.click({force:true});await sleep(1200);const k=p.locator('[data-mag-view="mitekore"]:visible').first();if(await k.count())await k.click({force:true});else await p.evaluate(()=>window.fujiyaMiteHoshii?.open?.());await sleep(2600);await p.evaluate(()=>window.fujiyaMiteHoshii?.refresh?.());await sleep(3200);await dismiss(p)}
+          function post(p){return p.locator('#miteHoshiiFeed .mh-card[data-mh-post]').filter({hasText:POST_TEXT}).first()}
+          (async()=>{const browser=await chromium.launch({headless:true});try{
+            const pb=await make(browser,B,NAME_B);await openFeed(pb);let c=post(pb);if(await c.count()){
+              await c.locator('[data-mh-comment-open43]').first().click({force:true});await sleep(900);
+              const row=pb.locator('#mhCommentModal43 .mh-comment-row43').filter({hasText:COMMENT}).first();
+              if(await row.count()){const del=row.locator('[data-mh-comment-delete43]').first();if(!await del.count())throw new Error('comment delete button missing');await del.click({force:true});await sleep(3300);const remains=(await pb.locator('#mhCommentModal43').innerText()).includes(COMMENT);if(remains)throw new Error('comment still present after delete');console.log('COMMENT_DELETE_OK')}
+              else console.log('COMMENT_ALREADY_GONE');
+              await pb.locator('[data-mh-comment-close43]:visible').click({force:true}).catch(()=>{});
+            }
+            const pa=await make(browser,A,NAME_A);await openFeed(pa);c=post(pa);if(await c.count()){
+              const more=c.locator('[data-mh-more-open611]').first();if(!await more.count())throw new Error('current more button missing');await more.click({force:true});await sleep(350);
+              const del=pa.locator('[data-mh-more-delete611]:visible').first();if(!await del.count())throw new Error('current delete menu missing');await del.click({force:true});await sleep(5500);await pa.evaluate(()=>window.fujiyaMiteHoshii?.refresh?.());await sleep(2500);if(await post(pa).count())throw new Error('post still visible to author');console.log('POST_DELETE_AUTHOR_OK');
+            }else console.log('POST_ALREADY_GONE');
+            await openFeed(pb);if(await post(pb).count())throw new Error('deleted post still visible to other user');console.log('POST_DELETE_OTHER_OK');
+          }finally{await browser.close()}})().catch(e=>{console.error(e.stack||e);process.exit(1)});
+          NODE
