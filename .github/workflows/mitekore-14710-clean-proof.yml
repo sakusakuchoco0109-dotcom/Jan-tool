@@ -1,0 +1,67 @@
+name: MiteKore 14710 Clean Final Proof
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-14710-clean-proof.yml'
+  workflow_dispatch:
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+      - name: Build 14710 from current live HTML
+        run: |
+          curl -fsSL 'https://hilarious-haupia-6e0406.netlify.app/' -o app.html
+          base64 -d .github/tmp/mitekore-14710-clean.patch.b64 | gzip -dc > clean.patch
+          patch --batch --forward app.html < clean.patch
+          grep -q 'fujiyaAuthoritativePtAndLikeRC14710' app.html
+          ! grep -q 'pt_like_bootstrap_frame' app.html
+          ! grep -q 'fujiyaBootstrapLegacyLikes14708' app.html
+      - name: Verify shared count and PT add/remove in real browser
+        env:
+          APP_URL: https://hilarious-haupia-6e0406.netlify.app/
+          GAS_URL: https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec
+        run: |
+          node <<'NODE'
+          const { chromium }=require('playwright');
+          const fs=require('fs');
+          const APP=process.env.APP_URL,GAS=process.env.GAS_URL;
+          const USER=`fujiya_chatgpt_clean14710_${process.env.GITHUB_RUN_ID}_${process.env.GITHUB_RUN_ATTEMPT}`;
+          const ARTICLE_KEY='article:mag_ai_aiq_20260901_0012_012',ARTICLE_NEEDLE='トラキア776';
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          async function gasGet(params={}){const u=new URL(GAS);for(const[k,v]of Object.entries(params))u.searchParams.set(k,String(v));const ac=new AbortController(),t=setTimeout(()=>ac.abort(),15000);try{const r=await fetch(u,{redirect:'follow',signal:ac.signal}),text=await r.text();let json=null;try{json=JSON.parse(text)}catch(_){}return{ok:r.ok,json}}finally{clearTimeout(t)}}
+          async function dismiss(page){for(const sel of ['[data-profile-unlock-close]','#rareBurstCloseBtn','.mike-talk-close','#tutorialCloseBtn','#firstRunCloseBtn','#devicePairCloseBtn']){try{const x=page.locator(sel).first();if(await x.count()&&await x.isVisible())await x.click({force:true,timeout:800})}catch(_){}}}
+          (async()=>{
+            const html=fs.readFileSync('app.html','utf8'),status=await gasGet({action:'status'});console.log('GAS_STATUS',JSON.stringify(status.json));if(!status.json?.ok)throw new Error('GAS status failed');
+            const browser=await chromium.launch({headless:true}),ctx=await browser.newContext({viewport:{width:1440,height:1200}});
+            await ctx.addInitScript(({USER,GAS,ARTICLE_KEY})=>{localStorage.setItem('fujiya_collection_user_id',USER);localStorage.setItem('fujiya_mitereco_identity_user_v2',USER);localStorage.setItem('fujiya_collection_user_name','チャッピー14710確認');localStorage.setItem('fujiya_collection_profile_v20_1',JSON.stringify({name:'チャッピー14710確認',favoritePlatforms:[],favoriteGames:[],links:{},visibility:{}}));localStorage.setItem('fujiya_collection_setup_done_v1','1');localStorage.setItem('fujiya_collection_tutorial_seen_v2_rc1474','1');localStorage.setItem('fujiya_collection_first_run_seen_v20_2_35cn','1');localStorage.setItem('fujiya_collection_share_opt_in_v1','1');localStorage.setItem('fujiya_collection_gas_endpoint',GAS);localStorage.setItem('fujiya_mitehoshii_like_local_v1',JSON.stringify({[USER]:{[ARTICLE_KEY]:{likedAt:new Date().toISOString(),giverPt:1,authorId:'mitekore_ai_editorial',source:'article'}}}))},{USER,GAS,ARTICLE_KEY});
+            const page=await ctx.newPage(),logs=[];page.on('console',m=>logs.push(`${m.type()}: ${m.text()}`));page.on('pageerror',e=>logs.push(`PAGEERROR: ${e.message}`));await page.route(APP,r=>r.fulfill({status:200,contentType:'text/html; charset=utf-8',body:html}));
+            await page.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});await sleep(7000);await dismiss(page);if(await page.evaluate(()=>typeof window.fujiyaAuthoritativeLikeState14710)!=='function')throw new Error('14710 module missing');
+            await page.locator('[data-ui-tab="magazine"]:visible').first().click({force:true});await sleep(1600);await dismiss(page);await page.locator('[data-mag-view="articles"]:visible').first().click({force:true});
+            await page.waitForFunction(n=>[...document.querySelectorAll('.mitemaga-card')].some(x=>x.textContent.includes(n)),ARTICLE_NEEDLE,{timeout:70000});const article=page.locator('.mitemaga-card').filter({hasText:ARTICLE_NEEDLE}).first(),articleLike=article.locator('.fujiya-cross-like').first();await articleLike.waitFor({state:'visible',timeout:20000});await page.waitForFunction(k=>window.fujiyaAuthoritativeLikeState14710?.(k)?.count>=1,ARTICLE_KEY,{timeout:30000});
+            const articleState=await page.evaluate(k=>window.fujiyaAuthoritativeLikeState14710(k),ARTICLE_KEY),articleBefore=await articleLike.locator('.fujiya-cross-like-count').textContent();await article.evaluate(el=>{const n=document.createElement('i');el.appendChild(n);n.remove()});await sleep(1000);const articleAfter=await articleLike.locator('.fujiya-cross-like-count').textContent();if(String(articleBefore)!==String(articleState.count)||String(articleAfter)!==String(articleState.count))throw new Error('shared count overwritten '+JSON.stringify({articleBefore,articleAfter,articleState}));
+            await page.locator('[data-mag-view="mitekore"]:visible').first().click({force:true});await sleep(2200);await page.waitForFunction(()=>document.querySelectorAll('#miteHoshiiFeed .mh-card[data-mh-post]').length>0,{timeout:70000});const cards=page.locator('#miteHoshiiFeed .mh-card[data-mh-post]');let chosen=null;for(let i=0;i<Math.min(await cards.count(),100);i++){const c=cards.nth(i),text=(await c.innerText().catch(()=>''))||'',author=await c.getAttribute('data-mh-author-user'),post=await c.getAttribute('data-mh-post');if(text.includes('藤や玩具店 店長')&&author&&post){chosen={i,text:text.replace(/\s+/g,' ').slice(0,240),author,post};break}}if(!chosen)throw new Error('店長投稿なし');
+            const card=cards.nth(chosen.i),like=card.locator('[data-mh-pt]').first();await like.waitFor({state:'visible',timeout:15000});const beforeAuthor=(await gasGet({action:'pt_balance_state',userId:chosen.author})).json,beforeGiver=(await gasGet({action:'pt_balance_state',userId:USER})).json,beforeLike=(await gasGet({action:'pt_like_state',userId:USER,postKeys:chosen.post})).json?.likes?.[0];if(beforeLike?.liked)throw new Error('fresh user already liked');
+            await like.click({force:true});await sleep(9000);const likedAuthor=(await gasGet({action:'pt_balance_state',userId:chosen.author})).json,likedGiver=(await gasGet({action:'pt_balance_state',userId:USER})).json,likedState=(await gasGet({action:'pt_like_state',userId:USER,postKeys:chosen.post})).json?.likes?.[0],likeDeltas={authorAvailable:Number(likedAuthor.available||0)-Number(beforeAuthor.available||0),authorReceived:Number(likedAuthor.likeReceivedPoints||0)-Number(beforeAuthor.likeReceivedPoints||0),giverAvailable:Number(likedGiver.available||0)-Number(beforeGiver.available||0),giverGiven:Number(likedGiver.likeGivenPoints||0)-Number(beforeGiver.likeGivenPoints||0)};if(!likedState?.liked||likeDeltas.authorReceived!==1||likeDeltas.giverGiven!==1)throw new Error('PT add failed '+JSON.stringify({likedState,likeDeltas}));
+            await like.click({force:true});await sleep(9000);const endAuthor=(await gasGet({action:'pt_balance_state',userId:chosen.author})).json,endGiver=(await gasGet({action:'pt_balance_state',userId:USER})).json,endState=(await gasGet({action:'pt_like_state',userId:USER,postKeys:chosen.post})).json?.likes?.[0],restore={authorAvailable:Number(endAuthor.available||0)-Number(beforeAuthor.available||0),authorReceived:Number(endAuthor.likeReceivedPoints||0)-Number(beforeAuthor.likeReceivedPoints||0),giverAvailable:Number(endGiver.available||0)-Number(beforeGiver.available||0),giverGiven:Number(endGiver.likeGivenPoints||0)-Number(beforeGiver.likeGivenPoints||0)};if(endState?.liked||Object.values(restore).some(v=>v!==0))throw new Error('unlike restore failed '+JSON.stringify({endState,restore}));
+            const out={article:{state:articleState,before:articleBefore,after:articleAfter},chosen,likeDeltas,restore,logs:logs.slice(-80)};console.log('CLEAN_14710_PROOF',JSON.stringify(out));fs.writeFileSync('clean-14710-proof.json',JSON.stringify(out,null,2));await page.screenshot({path:'clean-14710-proof.png',fullPage:false});await browser.close();
+          })().catch(e=>{console.error(e.stack||e);process.exit(1)});
+          NODE
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-14710-clean-proof
+          path: |
+            clean-14710-proof.json
+            clean-14710-proof.png
