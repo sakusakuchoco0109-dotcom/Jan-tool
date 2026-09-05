@@ -1,0 +1,103 @@
+name: MiteKore Owner Post Like PT Proof
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-owner-post-like-pt-proof.yml'
+  workflow_dispatch:
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+      - name: Like one owner MiteKore post and verify author PT
+        env:
+          APP_URL: https://hilarious-haupia-6e0406.netlify.app/
+          GAS_URL: https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec
+        run: |
+          node <<'NODE'
+          const { chromium } = require('playwright');
+          const fs = require('fs');
+          const APP = process.env.APP_URL;
+          const GAS = process.env.GAS_URL;
+          const TEST_USER = `fujiya_chatgpt_ownerpost_${process.env.GITHUB_RUN_ID}_${process.env.GITHUB_RUN_ATTEMPT}`;
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          async function gasGet(params={}){
+            const u=new URL(GAS);for(const[k,v]of Object.entries(params))u.searchParams.set(k,String(v));
+            const ac=new AbortController();const t=setTimeout(()=>ac.abort(),12000);
+            try{const r=await fetch(u,{redirect:'follow',signal:ac.signal});const text=await r.text();let json=null;try{json=JSON.parse(text)}catch(_){};return{status:r.status,ok:r.ok,json,text:text.slice(0,800)}}finally{clearTimeout(t)}
+          }
+          async function dismiss(page){
+            for(const sel of ['[data-profile-unlock-close]','#rareBurstCloseBtn','.mike-talk-close','#tutorialCloseBtn','#firstRunCloseBtn','#devicePairCloseBtn']){
+              try{const x=page.locator(sel).first();if(await x.count()&&await x.isVisible())await x.click({force:true,timeout:800});}catch(_){}
+            }
+          }
+          (async()=>{
+            const status=await gasGet({action:'status'});
+            console.log('GAS_STATUS',JSON.stringify(status.json));
+            const browser=await chromium.launch({headless:true});
+            const ctx=await browser.newContext({viewport:{width:1440,height:1200}});
+            await ctx.addInitScript(({TEST_USER,GAS})=>{
+              localStorage.setItem('fujiya_collection_user_id',TEST_USER);
+              localStorage.setItem('fujiya_mitereco_identity_user_v2',TEST_USER);
+              localStorage.setItem('fujiya_collection_user_name','チャッピーPT確認');
+              localStorage.setItem('fujiya_collection_profile_v20_1',JSON.stringify({name:'チャッピーPT確認',bio:'いいねPT確認用',favoritePlatforms:[],favoriteGames:[],links:{},visibility:{}}));
+              localStorage.setItem('fujiya_collection_setup_done_v1','1');
+              localStorage.setItem('fujiya_collection_tutorial_seen_v2_rc1474','1');
+              localStorage.setItem('fujiya_collection_first_run_seen_v20_2_35cn','1');
+              localStorage.setItem('fujiya_collection_share_opt_in_v1','1');
+              localStorage.setItem('fujiya_collection_gas_endpoint',GAS);
+            },{TEST_USER,GAS});
+            const page=await ctx.newPage();
+            const logs=[];page.on('console',m=>logs.push(`${m.type()}: ${m.text()}`));page.on('pageerror',e=>logs.push(`PAGEERROR: ${e.message}`));
+            await page.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});await sleep(7000);await dismiss(page);
+            const mag=page.locator('[data-ui-tab="magazine"]:visible').first();if(!await mag.count())throw new Error('みてトピタブなし');
+            await mag.click({force:true});await sleep(1800);await dismiss(page);
+            const mk=page.locator('[data-mag-view="mitekore"]:visible').first();if(await mk.count()){await mk.click({force:true});await sleep(1500);}
+            await page.waitForFunction(()=>document.querySelectorAll('#miteHoshiiFeed .mh-card[data-mh-post]').length>0,{timeout:70000});
+            const cards=page.locator('#miteHoshiiFeed .mh-card[data-mh-post]');
+            const candidates=[];
+            for(let i=0;i<Math.min(await cards.count(),80);i++){
+              const c=cards.nth(i);const text=(await c.innerText().catch(()=>''))||'';const author=await c.getAttribute('data-mh-author-user');const post=await c.getAttribute('data-mh-post');
+              if(text.includes('藤や玩具店 店長')) candidates.push({i,text:text.replace(/\s+/g,' ').slice(0,220),author,post});
+            }
+            console.log('OWNER_CANDIDATES',JSON.stringify(candidates));
+            if(!candidates.length)throw new Error('藤や玩具店 店長の見てコレ投稿が表示されていない');
+            const chosen=candidates[0];const card=cards.nth(chosen.i);const like=card.locator('[data-mh-pt]').first();await like.waitFor({state:'visible',timeout:15000});
+            const authorUserId=String(chosen.author||'').trim();const postKey=String(chosen.post||'').trim();if(!authorUserId||!postKey)throw new Error('投稿者IDまたは投稿IDなし '+JSON.stringify(chosen));
+            const beforeAuthor=await gasGet({action:'pt_balance_state',userId:authorUserId});
+            const beforeGiver=await gasGet({action:'pt_balance_state',userId:TEST_USER});
+            const beforeLike=await gasGet({action:'pt_like_state',userId:TEST_USER,postKeys:postKey});
+            console.log('BEFORE',JSON.stringify({author:beforeAuthor.json,giver:beforeGiver.json,like:beforeLike.json,chosen}));
+            if(beforeLike.json?.likes?.[0]?.liked)throw new Error('fresh test user already liked target');
+            await like.click({force:true});
+            await sleep(8500);
+            const afterAuthor=await gasGet({action:'pt_balance_state',userId:authorUserId});
+            const afterGiver=await gasGet({action:'pt_balance_state',userId:TEST_USER});
+            const afterLike=await gasGet({action:'pt_like_state',userId:TEST_USER,postKeys:postKey});
+            const a0=Number(beforeAuthor.json?.available||0),a1=Number(afterAuthor.json?.available||0),ar0=Number(beforeAuthor.json?.likeReceivedPoints||0),ar1=Number(afterAuthor.json?.likeReceivedPoints||0);
+            const g0=Number(beforeGiver.json?.available||0),g1=Number(afterGiver.json?.available||0),gg0=Number(beforeGiver.json?.likeGivenPoints||0),gg1=Number(afterGiver.json?.likeGivenPoints||0);
+            const result={testUser:TEST_USER,chosen,authorUserId,postKey,beforeAuthor:beforeAuthor.json,afterAuthor:afterAuthor.json,beforeGiver:beforeGiver.json,afterGiver:afterGiver.json,afterLike:afterLike.json,deltas:{authorAvailable:a1-a0,authorLikeReceived:ar1-ar0,giverAvailable:g1-g0,giverLikeGiven:gg1-gg0},logs:logs.slice(-80)};
+            console.log('OWNER_POST_PT_PROOF',JSON.stringify(result));fs.writeFileSync('owner-post-pt-proof.json',JSON.stringify(result,null,2));await page.screenshot({path:'owner-post-pt-proof.png',fullPage:false});
+            if(!afterLike.json?.likes?.[0]?.liked)throw new Error('いいねがGASに保存されていない');
+            if((ar1-ar0)!==1)throw new Error('投稿者のlikeReceivedPointsが+1になっていない '+JSON.stringify(result.deltas));
+            await browser.close();
+          })().catch(e=>{console.error(e.stack||e);process.exit(1)});
+          NODE
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-owner-post-like-pt-proof
+          path: |
+            owner-post-pt-proof.json
+            owner-post-pt-proof.png
