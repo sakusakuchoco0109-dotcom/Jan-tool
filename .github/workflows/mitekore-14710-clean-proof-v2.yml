@@ -1,0 +1,34 @@
+name: MiteKore 14710 Clean Final Proof V2
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-14710-clean-proof-v2.yml'
+  workflow_dispatch:
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install test dependencies
+        run: |
+          npm init -y
+          npm i playwright@1.48.2 diff@7.0.0
+          npx playwright install chromium --with-deps
+      - name: Verify clean 14710
+        env:
+          APP_URL: https://hilarious-haupia-6e0406.netlify.app/
+          GAS_URL: https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec
+        run: node .github/tmp/mitekore-14710-build-and-proof.js
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-14710-clean-proof-v2
+          path: |
+            clean-14710-proof.json
+            clean-14710-proof.png
