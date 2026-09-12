@@ -1,0 +1,25 @@
+name: Temp Mitekore title master read benchmark
+on:
+  push:
+    paths:
+      - '.github/workflows/temp-title-master-bench-0912.yml'
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Benchmark read-only title master endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='https://script.google.com/macros/s/AKfycbwYj13IWQ9fjn6sWRhzoFIHXtyIdb2mXNeRF2C75-ZvdHpZ8Row1f13NGRt5iF5F72x/exec'
+          hit(){
+            name="$1"; url="$2"
+            out="/tmp/${name}.txt"
+            metrics=$(curl -fsSL --max-time 65 -o "$out" -w '%{http_code} %{time_total} %{size_download}' "$url") || { rc=$?; echo "$name CURL_FAIL rc=$rc"; return 1; }
+            echo "$name $metrics"
+            grep -q '"ok":true' "$out" || { echo "$name BAD_RESPONSE"; head -c 300 "$out"; echo; return 2; }
+          }
+          hit meta "$BASE?action=title_master_meta"
+          for o in 0 750 1500 2250 3000; do hit "chunk_$o" "$BASE?action=title_master_chunk&offset=$o&limit=750"; done
+          echo BENCH_OK
