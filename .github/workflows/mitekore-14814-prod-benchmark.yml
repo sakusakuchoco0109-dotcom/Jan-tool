@@ -26,12 +26,11 @@ jobs:
           const { chromium } = require('playwright');
           const SITE=process.env.SITE;
           const med=a=>{const b=[...a].sort((x,y)=>x-y);return b[Math.floor(b.length/2)]};
-          const fmt=n=>Number(n).toFixed(3);
           (async()=>{
             const browser=await chromium.launch({headless:true});
             const context=await browser.newContext();
             const page=await context.newPage();
-            page.on('console',m=>{if(['error'].includes(m.type()))console.log('BROWSER_CONSOLE',m.type(),m.text().slice(0,400));});
+            page.on('console',m=>{if(m.type()==='error')console.log('BROWSER_CONSOLE',m.type(),m.text().slice(0,400));});
             const navStart=Date.now();
             const resp=await page.goto(SITE+'?prodbench='+Date.now(),{waitUntil:'domcontentloaded',timeout:120000});
             const domMs=Date.now()-navStart;
@@ -40,17 +39,23 @@ jobs:
             console.log('PROD_HTTP',resp?.status(),'DOM_MS',domMs,'VERSION',version);
             if(!version.startsWith('14814-')) throw new Error('Production is not 14814: '+version);
 
-            async function run(label, makeOpts, n=3){
+            async function run(label, makeOpts, validateKind, n=3){
               const rows=[];
               for(let i=0;i<n;i++){
-                const result=await page.evaluate(async ({opts,label})=>{
+                const result=await page.evaluate(async ({opts,validateKind})=>{
+                  const validators={
+                    articles:d=>!!d&&d.ok!==false&&Array.isArray(d.articles),
+                    article:d=>!!d&&d.ok!==false&&!!d.article,
+                    comments:d=>!!d&&d.ok!==false&&Array.isArray(d.comments)
+                  };
+                  opts.validate=validators[validateKind]||((d)=>!!d&&d.ok!==false);
                   window.__FUJIYA_HEDGED_READ_DIAG__={started:0,primaryWins:0,hedgeWins:0,failures:0,activeHedges:0,last:null};
                   const t=performance.now();
                   try{
                     const data=await window.fujiyaHedgedGasRead14814(opts);
-                    return {ok:true,ms:performance.now()-t,diag:window.__FUJIYA_HEDGED_READ_DIAG__,keys:Object.keys(data||{}),data};
+                    return {ok:true,ms:performance.now()-t,diag:window.__FUJIYA_HEDGED_READ_DIAG__,data};
                   }catch(e){return {ok:false,ms:performance.now()-t,error:String(e?.message||e),diag:window.__FUJIYA_HEDGED_READ_DIAG__};}
-                },{opts:makeOpts(),label});
+                },{opts:makeOpts(),validateKind});
                 const summary={ok:result.ok,ms:result.ms,source:result.diag?.last?.source||'',err:result.error||''};
                 console.log('SAMPLE',label,i+1,JSON.stringify(summary));
                 if(!result.ok) throw new Error(label+' failed: '+result.error);
@@ -67,9 +72,8 @@ jobs:
               jsonpAction:'magazine_list_light',frameAction:'magazine_list_light_frame',
               params:{limit:'30',offset:'0',coverLimit:'4',knownRevision:''},
               fields:{limit:'30',offset:'0',coverLimit:'4',knownRevision:''},
-              hedgeDelayMs:2800,jsonpTimeoutMs:12000,frameTimeoutMs:14000,
-              validate:d=>!!d&&d.ok!==false&&Array.isArray(d.articles)
-            }));
+              hedgeDelayMs:2800,jsonpTimeoutMs:12000,frameTimeoutMs:14000
+            }),'articles');
             const articleId=list.rows[0].data?.articles?.[0]?.id||list.rows[0].data?.articles?.[0]?.articleId;
             if(!articleId) throw new Error('No article id from production list');
             console.log('ARTICLE_ID',articleId);
@@ -77,26 +81,22 @@ jobs:
             await run('magazine_read',()=>({
               jsonpAction:'magazine_read',frameAction:'magazine_read_frame',
               params:{articleId,userId:''},fields:{articleId,userId:''},
-              hedgeDelayMs:3000,jsonpTimeoutMs:12000,frameTimeoutMs:14000,
-              validate:d=>!!d&&d.ok!==false&&!!d.article
-            }));
+              hedgeDelayMs:3000,jsonpTimeoutMs:12000,frameTimeoutMs:14000
+            }),'article');
 
             await run('magazine_comments',()=>({
               jsonpAction:'magazine_comments',frameAction:'magazine_comments_frame',
               params:{articleId,limit:'80'},fields:{articleId,limit:'80'},
-              hedgeDelayMs:2600,jsonpTimeoutMs:10000,frameTimeoutMs:12000,
-              validate:d=>!!d&&d.ok!==false&&Array.isArray(d.comments)
-            }));
+              hedgeDelayMs:2600,jsonpTimeoutMs:10000,frameTimeoutMs:12000
+            }),'comments');
 
             const parentId='mh_fe3cffd5-5bd6-4c5b-9623-f70499af22e7';
             await run('mitekore_comments',()=>({
               jsonpAction:'mitekore_comments',frameAction:'mitekore_comments_frame',
               params:{parentId,limit:'200'},fields:{parentId,limit:'200'},
-              hedgeDelayMs:2600,jsonpTimeoutMs:10000,frameTimeoutMs:12000,
-              validate:d=>!!d&&d.ok!==false&&Array.isArray(d.comments)
-            }));
+              hedgeDelayMs:2600,jsonpTimeoutMs:10000,frameTimeoutMs:12000
+            }),'comments');
 
-            // Forced stall: delay only GET magazine_read. POST iframe remains untouched.
             let delayed=false;
             await page.route('**/*',async route=>{
               const req=route.request(); const url=req.url();
