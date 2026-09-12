@@ -1,0 +1,113 @@
+name: MiteKore 14815 Prod Benchmark
+on:
+  push:
+    paths:
+      - '.github/workflows/mitekore-14815-prod-benchmark.yml'
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Playwright package
+        run: |
+          npm init -y
+          npm i playwright@1.48.2 --ignore-scripts
+      - name: Run production browser benchmark
+        env:
+          SITE: https://hilarious-haupia-6e0406.netlify.app/
+        run: |
+          node <<'NODE'
+          const { chromium } = require('playwright');
+          const SITE=process.env.SITE;
+          const med=a=>{const b=[...a].sort((x,y)=>x-y);return b[Math.floor(b.length/2)]};
+          (async()=>{
+            const browser=await chromium.launch({channel:'chrome',headless:true});
+            const page=await browser.newPage();
+            const t0=Date.now();
+            const resp=await page.goto(SITE+'?prodbench14815='+Date.now(),{waitUntil:'domcontentloaded',timeout:120000});
+            const domMs=Date.now()-t0;
+            await page.waitForFunction(()=>window.__FUJIYA_CLIENT_APP_VERSION__&&typeof window.fujiyaHedgedGasRead14815==='function',{timeout:120000});
+            const version=await page.evaluate(()=>String(window.__FUJIYA_CLIENT_APP_VERSION__||''));
+            console.log('PROD_HTTP',resp?.status(),'DOM_MS',domMs,'VERSION',version);
+            if(!version.startsWith('14815-')) throw new Error('Production is not 14815: '+version);
+
+            async function run(label, opts, kind, n=3){
+              const rows=[];
+              for(let i=0;i<n;i++){
+                const result=await page.evaluate(async ({opts,kind})=>{
+                  const validators={
+                    articles:d=>!!d&&d.ok!==false&&Array.isArray(d.articles),
+                    article:d=>!!d&&d.ok!==false&&!!d.article,
+                    comments:d=>!!d&&d.ok!==false&&Array.isArray(d.comments)
+                  };
+                  opts.validate=validators[kind]||((d)=>!!d&&d.ok!==false);
+                  window.__FUJIYA_HEDGED_READ_DIAG__={started:0,primaryWins:0,hedgeWins:0,failures:0,activeHedges:0,last:null};
+                  const t=performance.now();
+                  try{
+                    const data=await window.fujiyaHedgedGasRead14815(opts);
+                    return {ok:true,ms:performance.now()-t,diag:window.__FUJIYA_HEDGED_READ_DIAG__,data};
+                  }catch(e){return {ok:false,ms:performance.now()-t,error:String(e?.message||e),diag:window.__FUJIYA_HEDGED_READ_DIAG__};}
+                },{opts,kind});
+                console.log('SAMPLE',label,i+1,JSON.stringify({ok:result.ok,seconds:result.ms/1000,source:result.diag?.last?.source||'',err:result.error||''}));
+                if(!result.ok) throw new Error(label+' failed: '+result.error);
+                rows.push(result);
+                await page.waitForTimeout(700);
+              }
+              const ts=rows.map(r=>r.ms/1000);
+              const summary={label,min:Math.min(...ts),median:med(ts),max:Math.max(...ts),sources:rows.map(r=>r.diag?.last?.source||'')};
+              console.log('RESULT',JSON.stringify(summary));
+              return {rows,summary};
+            }
+
+            const list=await run('magazine_list_light',{
+              jsonpAction:'magazine_list_light',params:{limit:'30',offset:'0',coverLimit:'4',knownRevision:''},hedgeDelayMs:2800,jsonpTimeoutMs:12000,hedgeTimeoutMs:10000
+            },'articles');
+            const articleId=list.rows[0].data?.articles?.[0]?.id||list.rows[0].data?.articles?.[0]?.articleId;
+            if(!articleId) throw new Error('No article id');
+            console.log('ARTICLE_ID',articleId);
+
+            await run('magazine_read',{
+              jsonpAction:'magazine_read',params:{articleId,userId:''},hedgeDelayMs:3000,jsonpTimeoutMs:12000,hedgeTimeoutMs:10000
+            },'article');
+            await run('magazine_comments',{
+              jsonpAction:'magazine_comments',params:{articleId,limit:'80'},hedgeDelayMs:2600,jsonpTimeoutMs:10000,hedgeTimeoutMs:9000
+            },'comments');
+            await run('mitekore_comments',{
+              jsonpAction:'mitekore_comments',params:{parentId:'mh_fe3cffd5-5bd6-4c5b-9623-f70499af22e7',limit:'200'},hedgeDelayMs:2600,jsonpTimeoutMs:10000,hedgeTimeoutMs:9000
+            },'comments');
+
+            let delayed=false;
+            await page.route('**/*',async route=>{
+              const req=route.request();
+              const url=req.url();
+              if(!delayed && req.method()==='GET' && url.includes('script.google.com/macros/') && url.includes('action=magazine_read') && !url.includes('__fujiyaHedge=1')){
+                delayed=true;
+                console.log('FORCED_PRIMARY_STALL');
+                await new Promise(r=>setTimeout(r,6500));
+              }
+              await route.continue();
+            });
+            const forced=await page.evaluate(async articleId=>{
+              window.__FUJIYA_HEDGED_READ_DIAG__={started:0,primaryWins:0,hedgeWins:0,failures:0,activeHedges:0,last:null};
+              const t=performance.now();
+              try{
+                const data=await window.fujiyaHedgedGasRead14815({
+                  jsonpAction:'magazine_read',params:{articleId,userId:''},hedgeDelayMs:3000,jsonpTimeoutMs:12000,hedgeTimeoutMs:10000,
+                  validate:d=>!!d&&d.ok!==false&&!!d.article
+                });
+                return {ok:true,ms:performance.now()-t,diag:window.__FUJIYA_HEDGED_READ_DIAG__,id:data?.article?.id||''};
+              }catch(e){return {ok:false,ms:performance.now()-t,error:String(e?.message||e),diag:window.__FUJIYA_HEDGED_READ_DIAG__};}
+            },articleId);
+            console.log('FORCED_STALL_RESULT',JSON.stringify({ok:forced.ok,seconds:forced.ms/1000,source:forced.diag?.last?.source||'',diag:forced.diag,error:forced.error||''}));
+            if(!forced.ok) throw new Error('Forced stall failed: '+forced.error);
+            if(forced.diag?.last?.source!=='hedge') throw new Error('Forced stall did not hedge: '+JSON.stringify(forced.diag));
+
+            console.log('BENCHMARK_OK');
+            await browser.close();
+          })().catch(e=>{console.error('BENCHMARK_FATAL',e);process.exit(2);});
+          NODE
