@@ -1,0 +1,31 @@
+name: MiteKore Auth Live Audit 0914
+on:
+  push:
+    paths:
+      - 'mitekore-auth-live-audit-0914.js'
+      - '.github/workflows/mitekore-auth-live-audit-0914.yml'
+  workflow_dispatch:
+
+jobs:
+  auth-live-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare Playwright
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+          node --check mitekore-auth-live-audit-0914.js
+      - name: Run live Netlify to GAS auth audit
+        run: node mitekore-auth-live-audit-0914.js
+      - name: Upload audit result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-auth-live-audit-0914
+          path: mitekore-auth-live-audit-0914-result.json
