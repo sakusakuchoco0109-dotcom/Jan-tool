@@ -1,0 +1,31 @@
+name: MiteKore Auth UI Live Audit 0914 v2
+on:
+  push:
+    paths:
+      - 'mitekore-auth-ui-live-audit-0914-v2.js'
+      - '.github/workflows/mitekore-auth-ui-live-audit-0914-v2.yml'
+  workflow_dispatch:
+
+jobs:
+  auth-ui-live-audit-v2:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare Playwright
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+          node --check mitekore-auth-ui-live-audit-0914-v2.js
+      - name: Run live UI auth audit v2
+        run: node mitekore-auth-ui-live-audit-0914-v2.js
+      - name: Upload audit result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-auth-ui-live-audit-0914-v2
+          path: mitekore-auth-ui-live-audit-0914-v2-result.json
