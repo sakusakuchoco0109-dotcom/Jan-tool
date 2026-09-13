@@ -30,7 +30,14 @@ const SCREENSHOT = 'mitekore-auth-ui-live-screenshot-0914.png';
     await page.waitForFunction(() => !!window.fujiyaPremiumCloudBackup?.onboardingVerifyCode && !!document.getElementById('ufsVerifyCode14675'), null, { timeout: 60000 });
     out.uiReady = true;
 
-    // Fresh browser: accept the real legal gate with actual UI controls first.
+    // Fresh browser: wait for the real legal gate to appear, then accept it with actual UI controls.
+    try {
+      await page.waitForFunction(() => {
+        const el = document.getElementById('fujiyaLegalGate14750');
+        return !!el && el.classList.contains('show') && el.getAttribute('aria-hidden') === 'false';
+      }, null, { timeout: 5000 });
+    } catch (_) {}
+
     const legalVisible = await page.evaluate(() => {
       const el = document.getElementById('fujiyaLegalGate14750');
       return !!el && el.classList.contains('show') && el.getAttribute('aria-hidden') === 'false';
