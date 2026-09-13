@@ -30,6 +30,23 @@ const SCREENSHOT = 'mitekore-auth-ui-live-screenshot-0914.png';
     await page.waitForFunction(() => !!window.fujiyaPremiumCloudBackup?.onboardingVerifyCode && !!document.getElementById('ufsVerifyCode14675'), null, { timeout: 60000 });
     out.uiReady = true;
 
+    // Fresh browser: accept the real legal gate with actual UI controls first.
+    const legalVisible = await page.evaluate(() => {
+      const el = document.getElementById('fujiyaLegalGate14750');
+      return !!el && el.classList.contains('show') && el.getAttribute('aria-hidden') === 'false';
+    });
+    if (legalVisible) {
+      await page.check('#fujiyaLegalAgree14750');
+      await page.click('#fujiyaLegalAccept14750');
+      await page.waitForFunction(() => {
+        const el = document.getElementById('fujiyaLegalGate14750');
+        return !el || !el.classList.contains('show') || el.getAttribute('aria-hidden') === 'true';
+      }, null, { timeout: 10000 });
+      out.legalAcceptedByUi = true;
+    } else {
+      out.legalAcceptedByUi = false;
+    }
+
     const email = `mitekore-github-ui-${Date.now()}@example.com`;
     await page.evaluate(({ email }) => {
       try { window.fujiyaStartNormalVersion14728?.(); } catch (_) {}
@@ -62,7 +79,7 @@ const SCREENSHOT = 'mitekore-auth-ui-live-screenshot-0914.png';
     out.appVersion = await page.evaluate(() => window.MITEKORE_VERSION || window.__MITEKORE_VERSION__ || document.documentElement.getAttribute('data-version') || '');
     out.passed = out.pageLoaded && out.uiReady && !out.timeoutMessage && /確認コードが無効|有効時間が切れています/.test(out.statusText) && out.verifyPostCount >= 1 && out.statusPollCount >= 1;
 
-    // This is the actual Chromium-rendered Netlify page after the real GAS response returns.
+    // Actual Chromium-rendered Netlify page after the real GAS response returns.
     await page.screenshot({ path: SCREENSHOT, fullPage: true });
   } catch (e) {
     out.fatalError = String(e?.stack || e);
