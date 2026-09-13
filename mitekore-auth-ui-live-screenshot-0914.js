@@ -70,25 +70,24 @@ async function waitForCode(mailbox, timeoutMs=120000) {
 
     const r = await page.goto(TARGET, { waitUntil: 'domcontentloaded', timeout: 60000 });
     out.pageLoaded = !!r && r.ok();
-    await page.waitForFunction(() => !!document.getElementById('ufsStartNormal14728') && !!document.getElementById('ufsSendCode14675'), null, { timeout: 60000 });
+    await page.waitForFunction(() => !!document.getElementById('ufsChoiceFirst14759') && !!document.getElementById('ufsSendCode14675'), null, { timeout: 60000 });
     out.uiReady = true;
 
-    try {
-      await page.waitForFunction(() => {
-        const el = document.getElementById('fujiyaLegalGate14750');
-        return !!el && el.classList.contains('show') && el.getAttribute('aria-hidden') === 'false';
-      }, null, { timeout: 8000 });
-      await page.check('#fujiyaLegalAgree14750');
-      await page.click('#fujiyaLegalAccept14750');
-      await page.waitForFunction(() => {
-        const el = document.getElementById('fujiyaLegalGate14750');
-        return !el || !el.classList.contains('show') || el.getAttribute('aria-hidden') === 'true';
-      }, null, { timeout: 10000 });
-      out.legalAcceptedByUi = true;
-    } catch (e) {
-      out.legalAcceptedByUi = false;
-      throw e;
-    }
+    await page.waitForFunction(() => {
+      const el = document.getElementById('fujiyaLegalGate14750');
+      return !!el && el.classList.contains('show') && el.getAttribute('aria-hidden') === 'false';
+    }, null, { timeout: 8000 });
+    await page.check('#fujiyaLegalAgree14750');
+    await page.click('#fujiyaLegalAccept14750');
+    await page.waitForFunction(() => {
+      const el = document.getElementById('fujiyaLegalGate14750');
+      return !el || !el.classList.contains('show') || el.getAttribute('aria-hidden') === 'true';
+    }, null, { timeout: 10000 });
+    out.legalAcceptedByUi = true;
+
+    await page.click('#ufsChoiceFirst14759');
+    await page.waitForFunction(() => document.querySelector('[data-ufs-step="1"]')?.classList.contains('active'), null, { timeout: 10000 });
+    out.firstUseSelectedByUi = true;
 
     await page.click('#ufsStartNormal14728');
     await page.waitForFunction(() => document.querySelector('[data-ufs-step="2"]')?.classList.contains('active'), null, { timeout: 10000 });
@@ -128,10 +127,8 @@ async function waitForCode(mailbox, timeoutMs=120000) {
     out.verifyPostCount = out.gasPosts.filter(x => x.action === 'cloud_backup_setup_verify_frame').length;
     out.sendPostCount = out.gasPosts.filter(x => x.action === 'cloud_backup_setup_send_code_frame').length;
     out.statusPollCount = out.gasStatusRequests.length;
-    out.passed = out.pageLoaded && out.uiReady && out.legalAcceptedByUi && out.normalPlanSelectedByUi && out.sendUiAdvanced && out.mailReceived && out.codeExtracted && out.successStepVisible && out.phraseIssued;
-
-    documentTitle = await page.title();
-    out.pageTitle = documentTitle;
+    out.passed = out.pageLoaded && out.uiReady && out.legalAcceptedByUi && out.firstUseSelectedByUi && out.normalPlanSelectedByUi && out.sendUiAdvanced && out.mailReceived && out.codeExtracted && out.successStepVisible && out.phraseIssued;
+    out.pageTitle = await page.title();
     await page.screenshot({ path: SCREENSHOT, fullPage: true });
   } catch (e) {
     out.fatalError = String(e?.stack || e);
