@@ -1,0 +1,33 @@
+name: MiteKore 14831 Simulated E2E
+on:
+  push:
+    paths:
+      - 'mitekore-14831-sim-e2e.js'
+      - '.github/workflows/mitekore-14831-sim-e2e.yml'
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare Playwright
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+          node --check mitekore-14831-sim-e2e.js
+      - name: Run 14831 simulated E2E
+        run: node mitekore-14831-sim-e2e.js
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-14831-sim-e2e
+          path: |
+            mitekore-14831-sim-e2e-result.json
+            14831-*.png
