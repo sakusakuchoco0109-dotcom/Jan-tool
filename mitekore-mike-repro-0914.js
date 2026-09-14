@@ -10,8 +10,11 @@ async function getCode(mb,timeout=120000){const end=Date.now()+timeout;while(Dat
 
 async function enterSetup(page){
   try{await page.waitForFunction(()=>{const e=document.getElementById('fujiyaLegalGate14750');return !!e&&e.classList.contains('show')&&e.getAttribute('aria-hidden')==='false'},null,{timeout:8000});await page.check('#fujiyaLegalAgree14750');await page.click('#fujiyaLegalAccept14750');await page.waitForFunction(()=>{const e=document.getElementById('fujiyaLegalGate14750');return !e||!e.classList.contains('show')||e.getAttribute('aria-hidden')==='true'},null,{timeout:10000});}catch(_){}
-  const first=page.locator('#ufsStartFirst14728');if(await first.isVisible().catch(()=>false))await first.click();
-  const normal=page.locator('#ufsStartNormal14728');if(await normal.isVisible().catch(()=>false))await normal.click();
+  const first=page.locator('#ufsStartFirst14728');
+  if(await first.isVisible().catch(()=>false)) await first.click();
+  await page.locator('#ufsStartNormal14728').waitFor({state:'visible',timeout:10000}).catch(()=>{});
+  const normal=page.locator('#ufsStartNormal14728');
+  if(await normal.isVisible().catch(()=>false)) await normal.click();
   await page.waitForSelector('#ufsEmail14675',{state:'visible',timeout:15000});
 }
 
@@ -23,16 +26,9 @@ async function runScenario(browser,{name,seedLegacy=false,blackholeBeacon=false,
       try{
         localStorage.setItem('fujiya_collection_user_id','99999999');
         localStorage.setItem('fujiya_mitereco_identity_user_v2','99999999');
-        localStorage.setItem('fujiya_cloud_backup_user_id_v1','99999999');
-        localStorage.setItem('fujiya_cloud_backup_email_v1','legacy@example.invalid');
-        localStorage.setItem('fujiya_cloud_backup_phrase_v1','あいうえおかきくけこさしすせそた');
-        localStorage.setItem('fujiya_cloud_backup_account_key_v2','mk_cb2_'+'a'.repeat(64));
-        localStorage.setItem('fujiya_cloud_backup_sync_key_v1','mk_cs_'+'b'.repeat(64));
-        localStorage.setItem('fujiya_device_sync_secret_v1','mk_cs_'+'c'.repeat(64));
         localStorage.setItem('fujiya_device_identity_owner_user_v1','99999999');
         localStorage.setItem('fujiya_device_shared_canonical_user_v1','99999999');
-        localStorage.setItem('fujiya_device_sync_baseline_v1',JSON.stringify({revision:99,records:{legacy:{updatedAt:'2026-01-01T00:00:00Z'}}}));
-        localStorage.setItem('fujiya_device_sync_tombstones_v1',JSON.stringify({old:{deletedAt:'2026-01-02T00:00:00Z'}}));
+        localStorage.setItem('fujiya_collection_v20_1',JSON.stringify({entries:[{id:'legacy-test',title:'旧テストデータ',platform:'FC',updatedAt:'2026-01-01T00:00:00Z'}]}));
       }catch(_){}
     });
   }
@@ -46,7 +42,7 @@ async function runScenario(browser,{name,seedLegacy=false,blackholeBeacon=false,
   page.on('request',req=>{if(!req.url().includes('script.google.com'))return;if(req.method()==='POST'){const p=new URLSearchParams(req.postData()||'');result.posts.push(p.get('action')||'');}else if(req.url().includes('cloud_backup_auth_status'))result.statusPolls++;});
   try{
     await page.goto(TARGET,{waitUntil:'domcontentloaded',timeout:60000});
-    await page.waitForSelector('#ufsSendCode14675',{timeout:60000});
+    await page.waitForSelector('#ufsSendCode14675',{state:'attached',timeout:60000});
     await enterSetup(page);
     await page.fill('#ufsEmail14675',mb.address);
     await page.click('#ufsSendCode14675');
@@ -61,7 +57,7 @@ async function runScenario(browser,{name,seedLegacy=false,blackholeBeacon=false,
       const success=document.querySelector('[data-ufs-step="3"]')?.classList.contains('active')&&/メール確認とアカウント登録が完了/.test(String(document.getElementById('ufsPhraseStatus14675')?.textContent||''));
       const status=String(document.getElementById('ufsAccountStatus14675')?.textContent||'');
       return success||status.includes('本人確認要求をGASで受付確認できませんでした')||/CLOUD_BACKUP_/.test(status);
-    },null,{timeout:85000});
+    },null,{timeout:90000});
     result.elapsedMs=Date.now()-start;
     result.accountStatus=await page.$eval('#ufsAccountStatus14675',e=>String(e.textContent||'').trim()).catch(()=> '');
     result.phraseStatus=await page.$eval('#ufsPhraseStatus14675',e=>String(e.textContent||'').trim()).catch(()=> '');
