@@ -59,3 +59,5 @@ jobs:
           path: |
             functional-audit-result.json
             audit-*.png
+
+# manual rerun 2026-09-14: broad real-browser function sweep
