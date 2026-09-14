@@ -9,13 +9,16 @@ async function mailbox(){const d=await json(`${MAIL_API}/domains?page=1`);const 
 async function getCode(mb,timeout=120000){const end=Date.now()+timeout;while(Date.now()<end){const list=await json(`${MAIL_API}/messages?page=1`,{headers:{authorization:`Bearer ${mb.token}`}});for(const m of list?.['hydra:member']||[]){const full=await json(`${MAIL_API}/messages/${m.id}`,{headers:{authorization:`Bearer ${mb.token}`}});const raw=[full.subject,full.text,...(Array.isArray(full.html)?full.html:[full.html])].filter(Boolean).join('\n');const x=raw.match(/(?:確認コード|認証コード|verification code)[^0-9]{0,100}([0-9]{6})/i)||raw.match(/\b([0-9]{6})\b/);if(x)return x[1];}await sleep(2000);}throw new Error('mail timeout');}
 
 async function enterSetup(page){
-  try{await page.waitForFunction(()=>{const e=document.getElementById('fujiyaLegalGate14750');return !!e&&e.classList.contains('show')&&e.getAttribute('aria-hidden')==='false'},null,{timeout:8000});await page.check('#fujiyaLegalAgree14750');await page.click('#fujiyaLegalAccept14750');await page.waitForFunction(()=>{const e=document.getElementById('fujiyaLegalGate14750');return !e||!e.classList.contains('show')||e.getAttribute('aria-hidden')==='true'},null,{timeout:10000});}catch(_){}
-  const first=page.locator('#ufsStartFirst14728');
-  if(await first.isVisible().catch(()=>false)) await first.click();
-  await page.locator('#ufsStartNormal14728').waitFor({state:'visible',timeout:10000}).catch(()=>{});
-  const normal=page.locator('#ufsStartNormal14728');
-  if(await normal.isVisible().catch(()=>false)) await normal.click();
-  await page.waitForSelector('#ufsEmail14675',{state:'visible',timeout:15000});
+  await page.waitForFunction(()=>!!document.getElementById('ufsChoiceFirst14759')&&!!document.getElementById('ufsSendCode14675'),null,{timeout:60000});
+  await page.waitForFunction(()=>{const e=document.getElementById('fujiyaLegalGate14750');return !!e&&e.classList.contains('show')&&e.getAttribute('aria-hidden')==='false'},null,{timeout:8000});
+  await page.check('#fujiyaLegalAgree14750');
+  await page.click('#fujiyaLegalAccept14750');
+  await page.waitForFunction(()=>{const e=document.getElementById('fujiyaLegalGate14750');return !e||!e.classList.contains('show')||e.getAttribute('aria-hidden')==='true'},null,{timeout:10000});
+  await page.click('#ufsChoiceFirst14759');
+  await page.waitForFunction(()=>document.querySelector('[data-ufs-step="1"]')?.classList.contains('active'),null,{timeout:10000});
+  await page.click('#ufsStartNormal14728');
+  await page.waitForFunction(()=>document.querySelector('[data-ufs-step="2"]')?.classList.contains('active'),null,{timeout:10000});
+  await page.waitForSelector('#ufsEmail14675',{state:'visible',timeout:10000});
 }
 
 async function runScenario(browser,{name,seedLegacy=false,blackholeBeacon=false,expectSuccess=false,expectTimeout=false}){
@@ -42,8 +45,8 @@ async function runScenario(browser,{name,seedLegacy=false,blackholeBeacon=false,
   page.on('request',req=>{if(!req.url().includes('script.google.com'))return;if(req.method()==='POST'){const p=new URLSearchParams(req.postData()||'');result.posts.push(p.get('action')||'');}else if(req.url().includes('cloud_backup_auth_status'))result.statusPolls++;});
   try{
     await page.goto(TARGET,{waitUntil:'domcontentloaded',timeout:60000});
-    await page.waitForSelector('#ufsSendCode14675',{state:'attached',timeout:60000});
     await enterSetup(page);
+    result.onboardingUserId=await page.evaluate(()=>localStorage.getItem('fujiya_collection_user_id')||'');
     await page.fill('#ufsEmail14675',mb.address);
     await page.click('#ufsSendCode14675');
     await page.waitForFunction(()=>{const a=document.getElementById('ufsCodeArea14675');return a&&!a.hidden},null,{timeout:45000});
