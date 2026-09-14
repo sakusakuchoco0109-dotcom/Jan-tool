@@ -29,3 +29,5 @@ jobs:
         with:
           name: mitekore-current-critical-audit-0905
           path: current-critical-audit-result.json
+
+# manual rerun 2026-09-14: point reflection / full interaction check
