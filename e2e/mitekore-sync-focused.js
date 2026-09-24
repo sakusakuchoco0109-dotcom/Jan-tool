@@ -67,7 +67,12 @@ async function seedGame(page,who,title){
 async function waitTitle(page,title,timeout=90000){
   const t=Date.now();
   try{
-    await page.waitForFunction(tt=>Array.isArray(window.state?.entries)&&window.state.entries.some(e=>String(e.title||'').includes(tt)),title,{timeout});
+    await page.waitForFunction(tt=>{
+      try{
+        const rows=window.deviceSyncCaptureLocalRecords?.()||[];
+        return rows.some(r=>String(r?.data?.title||r?.data?.canonicalTitle||'').includes(tt));
+      }catch(_){return false;}
+    },title,{timeout});
     return Date.now()-t;
   }catch(e){return -1;}
 }
