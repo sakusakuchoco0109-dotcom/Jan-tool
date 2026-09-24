@@ -1,0 +1,32 @@
+name: MiteKore 14902 Release Audit 0924
+on:
+  push:
+    paths:
+      - 'mitekore-14902-release-audit-0924.js'
+      - '.github/workflows/mitekore-14902-release-audit-0924.yml'
+  workflow_dispatch:
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Prepare Playwright
+        run: |
+          npm init -y
+          npm i playwright@1.48.2
+          npx playwright install chromium --with-deps
+          node --check mitekore-14902-release-audit-0924.js
+      - name: Run release audit
+        run: node mitekore-14902-release-audit-0924.js
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-14902-release-audit-0924
+          path: |
+            mitekore-14902-release-audit-result.json
+            rel-*.png
