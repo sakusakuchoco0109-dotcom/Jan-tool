@@ -37,24 +37,32 @@ async function boot(page,who){
   check(who+' 起動',true,out.timings[who+'_dom_ms']+'ms');
 }
 async function seedGame(page,who,title){
-  const result=await page.evaluate(t=>{
+  await page.evaluate(t=>{
+    const key='fujiya_collection_v1';
+    let data={version:'test',entries:[],shelfEntryIds:[],recommendPreferredGenres:[],recommendPreferredMakers:[],platformTargets:{}};
+    try{const parsed=JSON.parse(localStorage.getItem(key)||'{}');if(parsed&&typeof parsed==='object')data={...data,...parsed};}catch(_){}
     const now=new Date().toISOString();
-    const raw={
-      id:(typeof uid==='function'?uid():'gh-'+Date.now()+'-'+Math.random().toString(36).slice(2)),
-      platform:'SFC',title:t,canonicalTitle:t,titleKey:(typeof titleKey==='function'?titleKey(t):t),
-      owned:true,mediaType:'package',rating:0,playStatus:'',clearHours:'',
-      purchaseDate:'',purchasePrice:'',purchaseStore:'',releaseDate:'',maker:'',
-      parts:(typeof emptyParts==='function'?emptyParts():{}),memo:'',photoData:'',
-      createdAt:now,updatedAt:now,sharedTitleId:'',sharedStatus:'unconfirmed',localSharedId:''
+    const id='gh-'+Date.now()+'-'+Math.random().toString(36).slice(2);
+    const entry={
+      id,platform:'SFC',title:t,owned:true,mediaType:'package',rating:0,playStatus:'',clearHours:'',
+      purchaseDate:'',purchasePrice:'',purchaseStore:'',overallCondition:'',operationChecked:false,
+      buybackOperationStatus:'',cleaned:false,stockLocation:'',marketMemo:'',releaseDate:'',maker:'',
+      parts:{rom:{has:true,condition:''},box:{has:false,condition:''},manual:{has:false,condition:''},accessory:{has:false,condition:''}},
+      accessoryRequired:false,memo:'',photoData:'',photoViewX:0,photoViewY:0,photoViewScale:1,photoViewRotate:0,photoViewSet:false,
+      createdAt:now,updatedAt:now,sharedTitleId:'',canonicalTitle:t,sharedStatus:'unconfirmed',localSharedId:''
     };
-    const entry=(typeof norm==='function'?norm(raw):raw);
-    state.entries.unshift(entry);
-    const ok=save();
-    render();
-    try{scheduleAutoSync?.('GitHub同期テスト追加');}catch(_){}
-    return {ok,id:entry.id,count:state.entries.length};
+    data.entries=Array.isArray(data.entries)?data.entries.filter(e=>String(e&&e.title||'')!==t):[];
+    data.entries.unshift(entry);
+    data.updatedAt=now;
+    localStorage.setItem(key,JSON.stringify(data));
   },title);
-  check(who+' ローカル追加 '+title,!!result?.ok,'entries='+result?.count);
+  await page.reload({waitUntil:'domcontentloaded',timeout:120000});
+  await page.waitForTimeout(700);
+  const normal=page.locator('#fujiyaEarlyAccessNormalStart14728');if(await normal.isVisible().catch(()=>false))await normal.click();
+  const ok=await page.evaluate(t=>{
+    try{return window.deviceSyncCaptureLocalRecords().some(r=>String(r?.data?.title||r?.data?.canonicalTitle||'').includes(t));}catch(_){return false;}
+  },title);
+  check(who+' ローカル追加 '+title,ok,ok?'端末同期キャプチャ確認済み':'キャプチャに見つからない');
 }
 async function waitTitle(page,title,timeout=90000){
   const t=Date.now();
