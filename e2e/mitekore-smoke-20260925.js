@@ -37,6 +37,18 @@ async function boot(page, name){
     await page.waitForTimeout(1200);
   }
   await acceptLegal(page);
+  const unified=page.locator('#unifiedFirstSetup14675');
+  if(await unified.isVisible().catch(()=>false)){
+    await page.evaluate(()=>{
+      localStorage.setItem('fujiya_unified_first_setup_v1_done','1');
+      localStorage.setItem('fujiya_collection_setup_done_v1',new Date().toISOString());
+      localStorage.setItem('fujiya_collection_first_run_seen_v20_2_35cn','1');
+      localStorage.setItem('fujiya_collection_tutorial_seen_v2_rc1474','1');
+      window.__MITEKORE_UNIFIED_SETUP_ACTIVE__=false;
+      const el=document.getElementById('unifiedFirstSetup14675'); if(el){el.hidden=true;el.style.display='none';}
+    });
+    out.notes.push(name+' unified初回設定はメール確認必須のためE2Eでは完了フラグを付与して本体テストへ移行');
+  }
   check(name+' 起動', true, 'DOM '+out.timings[name+'_dom_ms']+'ms');
 }
 
