@@ -10,6 +10,14 @@ const titleInSync=async(page,title)=>page.evaluate((t)=>{
   try { return JSON.stringify(window.deviceSyncCaptureLocalRecords?.()||[]).includes(t); } catch(e){ return false; }
 }, title);
 
+async function acceptLegal(page){
+  const gate=page.locator('#fujiyaLegalGate14750');
+  if(await gate.isVisible().catch(()=>false)){
+    await page.locator('#fujiyaLegalAgree14750').check();
+    await page.locator('#fujiyaLegalAccept14750').click();
+    await page.waitForTimeout(500);
+  }
+}
 async function boot(page, name){
   page.on('console',m=>{ const txt=m.text(); out.console.push({who:name,type:m.type(),text:txt}); console.log('['+name+']['+m.type()+'] '+txt); });
   page.on('pageerror',e=>{ out.pageErrors.push({who:name,error:String(e.stack||e)}); console.log('['+name+'][pageerror] '+String(e)); });
@@ -19,6 +27,7 @@ async function boot(page, name){
   await page.waitForTimeout(2500);
   const normal=page.locator('#fujiyaEarlyAccessNormalStart14728');
   if(await normal.isVisible().catch(()=>false)){ await normal.click(); await page.waitForTimeout(700); }
+  await acceptLegal(page);
   const newBtn=page.locator('#firstRunNewBtn');
   if(await newBtn.isVisible().catch(()=>false)){
     await newBtn.click();
@@ -27,6 +36,7 @@ async function boot(page, name){
     await page.locator('#firstRunStartBtn').click();
     await page.waitForTimeout(1200);
   }
+  await acceptLegal(page);
   check(name+' 起動', true, 'DOM '+out.timings[name+'_dom_ms']+'ms');
 }
 
