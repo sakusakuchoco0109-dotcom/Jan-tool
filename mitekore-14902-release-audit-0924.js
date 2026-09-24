@@ -4,6 +4,7 @@ const APP='https://hilarious-haupia-6e0406.netlify.app/';
 const MAIL_API='https://api.mail.tm';
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const report={startedAt:new Date().toISOString(),app:APP,version:'',steps:[],issues:[],console:[],timings:{},ids:{}};
+let accountEmail='',accountPhrase='';
 let shotNo=0;
 function safe(s){return String(s).replace(/[^\p{L}\p{N}_-]+/gu,'_').slice(0,60)}
 async function shot(page,name,full=false){const p='rel-'+String(++shotNo).padStart(2,'0')+'-'+safe(name)+'.png';await page.screenshot({path:p,fullPage:full});return p}
@@ -32,7 +33,8 @@ async function freshRegister(page){
   await page.waitForFunction(()=>document.querySelector('[data-ufs-step="3"]')?.classList.contains('active')||/メール確認とアカウント登録が完了/.test(String(document.getElementById('ufsPhraseStatus14675')?.textContent||'')),null,{timeout:120000});
   report.timings.accountVerifyMs=Date.now()-t;
   const phrase=await page.locator('#ufsPhrase14675').innerText().catch(()=> '');
-  report.ids.phraseLength=phrase.replace(/\s/g,'').length;
+  accountEmail=mb.address;accountPhrase=phrase.replace(/\s/g,'');
+  report.ids.phraseLength=accountPhrase.length;
   await page.locator('#ufsPhraseNext14675').click();
   await page.waitForFunction(()=>document.querySelector('[data-ufs-step="4"]')?.classList.contains('active'),null,{timeout:15000});
   await page.locator('#ufsFinish14675').click();await sleep(1800);await dismiss(page);
@@ -43,7 +45,7 @@ async function nav(page,tab){await dismiss(page);const ds=page.locator('[data-ui
 async function registerGame(page,platform,title,owned='owned'){
   await nav(page,'register');const quick=page.locator('#quickRegisterModeBtn');if(await quick.count()&&await quick.isVisible()){await quick.click();await sleep(200)}
   await page.locator('#platform').fill(platform);await page.locator('#title').fill(title);await page.locator('#title').dispatchEvent('input');await sleep(500);
-  const radio=page.locator('input[name="owned"][value="'+owned+'"]');if(await radio.count())await radio.check();
+  const radio=page.locator('input[name="owned"][value="'+owned+'"]');if(await radio.count()){const label=radio.locator('xpath=ancestor::label[1]');if(await label.count())await label.click();else await radio.check({force:true});}
   await page.locator('#saveBtn').click();await sleep(1500);await dismiss(page);
   return page.evaluate(title=>{let r={};try{r=JSON.parse(localStorage.getItem('fujiya_collection_v1')||'{}')}catch{};return (r.entries||[]).find(e=>e.title===title)||null},title)
 }
@@ -51,10 +53,18 @@ async function state(page){return page.evaluate(()=>{let r={};try{r=JSON.parse(l
 async function waitTitle(page,title,timeout){const t=Date.now();try{await page.waitForFunction(title=>{try{const r=JSON.parse(localStorage.getItem('fujiya_collection_v1')||'{}');return (r.entries||[]).some(e=>e.title===title)}catch{return false}},title,{timeout,polling:1000});return Date.now()-t}catch{return -1}}
 async function openSync(page){const more=page.locator('[data-desktop-more]:visible').first();if(await more.count()){await more.click();await sleep(200);const tab=page.locator('[data-desktop-tab="sync"]:visible').first();if(await tab.count()){await tab.click();await sleep(700);return}}const b=page.getByText('端末同期',{exact:false}).filter({visible:true}).last();if(await b.count()){await b.click();await sleep(700);return}throw new Error('同期画面を開けない')}
 async function pairPhone(browser,pc){
-  await openSync(pc);await pc.locator('#devicePairShowQrBtn:visible').click();await pc.waitForFunction(()=>!!document.querySelector('#devicePairUrl')?.dataset?.url,null,{timeout:20000});const url=await pc.locator('#devicePairUrl').evaluate(e=>e.dataset.url||'');
-  const ctx=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,locale:'ja-JP'});const p=await ctx.newPage();await attach(p,'phone');const t=Date.now();await p.goto(url,{waitUntil:'domcontentloaded',timeout:60000});
-  await p.waitForFunction(()=>document.body.innerText.includes('端末の接続が完了しました')||document.body.innerText.includes('接続完了：登録'),null,{timeout:300000});
-  report.timings.pairMs=Date.now()-t;await sleep(1200);await dismiss(p);return{ctx,page:p,url}
+  if(!accountEmail||accountPhrase.length!==16)throw new Error('同期用メール/じゅもんを取得できていない');
+  const ctx=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,locale:'ja-JP'});const p=await ctx.newPage();await attach(p,'phone');const t=Date.now();
+  await p.goto(APP,{waitUntil:'domcontentloaded',timeout:60000});await sleep(1800);await acceptLegal(p);
+  await p.waitForSelector('#ufsChoicePcLink14759',{timeout:60000});await p.locator('#ufsChoicePcLink14759').click();
+  await p.waitForFunction(()=>document.querySelector('[data-ufs-step="2"]')?.classList.contains('active'),null,{timeout:15000});
+  await p.locator('#ufsEmail14675').fill(accountEmail);await p.locator('#ufsExistingPhrase14675').fill(accountPhrase);
+  await p.locator('#ufsExistingLogin14675').click();
+  await p.waitForFunction(()=>localStorage.getItem('fujiya_collection_setup_done_v1')==='1'||document.getElementById('unifiedFirstSetup14675')?.hidden===true,null,{timeout:300000});
+  report.timings.pairMs=Date.now()-t;await sleep(1800);await dismiss(p);
+  const linked=await p.evaluate(()=>({userId:localStorage.getItem('fujiya_collection_user_id')||'',entries:(()=>{try{return JSON.parse(localStorage.getItem('fujiya_collection_v1')||'{}').entries||[]}catch{return[]}})().length}));
+  if(linked.userId!==report.ids.userId)issue('warning','別端末接続後のuserIdがPCと一致しない',{pc:report.ids.userId,phone:linked.userId});
+  return{ctx,page:p,linked}
 }
 async function detailButton(page,id,action){await nav(page,'list');const b=page.locator('button[data-action="detail"][data-id="'+id+'"]').first();if(await b.count()){await b.click();await sleep(450)}else{const e=page.locator('button[data-action="edit"][data-id="'+id+'"]').first();if(await e.count())await e.click();else throw new Error('詳細/編集ボタンなし')}const a=page.locator('[data-detail-action="'+action+'"]').first();if(!await a.count())throw new Error('detail actionなし '+action);await a.click();await sleep(700)}
 (async()=>{
@@ -64,7 +74,7 @@ async function detailButton(page,id,action){await nav(page,'list');const b=page.
   await step(pc,'プロフィール編集',async()=>{const b=pc.locator('#quickProfileEditBtn');if(!await b.count())throw new Error('プロフィール編集ボタンなし');await b.click();await sleep(400);const n=pc.locator('#quickUserNameInput');await n.fill('ChatGPT配布前監査0924');const bio=pc.locator('#quickProfileBioInput');if(await bio.count())await bio.fill('配布前E2E監査');await pc.locator('#quickSaveUserNameBtn').click();await sleep(1200);return{saved:true}});
   const fire=await step(pc,'PC_所持登録_FireRed',()=>registerGame(pc,'GBA','ポケットモンスター ファイアレッド','owned'),{critical:true});if(fire)report.ids.fireId=fire.id;
   const mother=await step(pc,'PC_欲しい登録_MOTHER2',()=>registerGame(pc,'SFC','MOTHER2 ギーグの逆襲','want'));if(mother)report.ids.motherId=mother.id;
-  const paired=await step(pc,'端末接続_PCからスマホ',()=>pairPhone(browser,pc),{critical:true});const phone=paired.page;
+  const paired=await step(pc,'端末接続_PCからスマホ_メールじゅもん',()=>pairPhone(browser,pc),{critical:true});const phone=paired.page;
   await step(phone,'PC登録がスマホへ反映',async()=>{const ms=await waitTitle(phone,'ポケットモンスター ファイアレッド',60000);if(ms<0)throw new Error('60秒で反映なし');report.timings.pcToPhoneMs=ms;return{ms}});
   const mugen=await step(phone,'スマホ_所持登録_夢幻の如く',()=>registerGame(phone,'SFC','夢幻の如く','owned'),{critical:true});if(mugen)report.ids.mugenId=mugen.id;
   await step(pc,'スマホ登録がPCへ自動反映',async()=>{const ms=await waitTitle(pc,'夢幻の如く',210000);report.timings.phoneToPcMs=ms;if(ms<0)throw new Error('210秒で反映なし');return{ms,seconds:Math.round(ms/1000)}});
