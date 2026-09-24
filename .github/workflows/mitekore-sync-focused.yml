@@ -1,0 +1,21 @@
+name: Mitekore Focused Sync
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Focused PC-Mobile sync
+        run: node e2e/mitekore-sync-focused.js
