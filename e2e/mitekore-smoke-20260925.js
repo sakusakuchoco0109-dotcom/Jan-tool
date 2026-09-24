@@ -1,0 +1,153 @@
+const { chromium } = require('playwright');
+const fs = require('fs');
+
+const BASE = 'https://hilarious-haupia-6e0406.netlify.app/';
+const out = { startedAt: new Date().toISOString(), base: BASE, checks: [], console: [], pageErrors: [], timings: {}, notes: [] };
+const check=(name,ok,detail='')=>{ out.checks.push({name,ok,detail}); console.log((ok?'PASS':'FAIL')+' '+name+(detail?' :: '+detail:'')); };
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const safeShot=async(page,name)=>{ try{ await page.screenshot({path:'artifacts/'+name+'.png',fullPage:true}); }catch(e){} };
+const titleInSync=async(page,title)=>page.evaluate((t)=>{
+  try { return JSON.stringify(window.deviceSyncCaptureLocalRecords?.()||[]).includes(t); } catch(e){ return false; }
+}, title);
+
+async function boot(page, name){
+  page.on('console',m=>{ const txt=m.text(); out.console.push({who:name,type:m.type(),text:txt}); console.log('['+name+']['+m.type()+'] '+txt); });
+  page.on('pageerror',e=>{ out.pageErrors.push({who:name,error:String(e.stack||e)}); console.log('['+name+'][pageerror] '+String(e)); });
+  const t0=Date.now();
+  await page.goto(BASE,{waitUntil:'domcontentloaded',timeout:120000});
+  out.timings[name+'_dom_ms']=Date.now()-t0;
+  await page.waitForTimeout(2500);
+  const normal=page.locator('#fujiyaEarlyAccessNormalStart14728');
+  if(await normal.isVisible().catch(()=>false)){ await normal.click(); await page.waitForTimeout(700); }
+  const newBtn=page.locator('#firstRunNewBtn');
+  if(await newBtn.isVisible().catch(()=>false)){
+    await newBtn.click();
+    await page.locator('#firstRunName').fill('ChatGPT同期検証0925-'+name);
+    await page.locator('#firstRunNextBtn').click();
+    await page.locator('#firstRunStartBtn').click();
+    await page.waitForTimeout(1200);
+  }
+  check(name+' 起動', true, 'DOM '+out.timings[name+'_dom_ms']+'ms');
+}
+
+async function addGame(page, platform, title, rating='4'){
+  const start=Date.now();
+  await page.evaluate(()=>document.querySelector('[data-ui-tab="register"]')?.click());
+  await page.waitForTimeout(500);
+  const quick=page.locator('#quickRegisterModeBtn');
+  if(await quick.isVisible().catch(()=>false)) await quick.click();
+  await page.locator('#platform').fill(platform);
+  await page.locator('#platform').dispatchEvent('change').catch(()=>{});
+  await page.locator('#title').fill(title);
+  const candidate=page.locator('#masterCandidates .candidate-item').filter({hasText:title}).first();
+  await candidate.waitFor({state:'visible',timeout:30000});
+  await candidate.click();
+  await page.locator('#rating').selectOption(rating).catch(()=>{});
+  const save=page.locator('#saveBtn');
+  await save.waitFor({state:'visible',timeout:10000});
+  if(await save.isDisabled()) throw new Error('saveBtn disabled: '+await save.textContent());
+  await save.click();
+  await page.waitForTimeout(1800);
+  const ok=await titleInSync(page,title);
+  check('登録 '+title,ok,(Date.now()-start)+'ms');
+  return Date.now()-start;
+}
+
+async function tapTabs(page, who){
+  const tabs=['list','dex','data','sync','manage'];
+  for(const tab of tabs){
+    try{
+      await page.evaluate(t=>document.querySelector('[data-ui-tab="'+t+'"],[data-desktop-tab="'+t+'"]')?.click(),tab);
+      await page.waitForTimeout(900);
+      check(who+' タブ '+tab,true);
+    }catch(e){ check(who+' タブ '+tab,false,String(e)); }
+  }
+}
+
+(async()=>{
+  fs.mkdirSync('artifacts',{recursive:true});
+  const browser=await chromium.launch({headless:true});
+  try{
+    const desktopCtx=await browser.newContext({viewport:{width:1440,height:1000}});
+    const desktop=await desktopCtx.newPage();
+    await boot(desktop,'PC');
+    await addGame(desktop,'SFC','スーパーマリオワールド','5');
+    await safeShot(desktop,'01-pc-after-register');
+
+    await tapTabs(desktop,'PC');
+    await safeShot(desktop,'02-pc-tabs');
+
+    const syncSetup=await desktop.evaluate(async()=>{
+      const key=window.deviceSyncGenerateKey();
+      localStorage.setItem('fujiya_device_sync_secret_v1',key);
+      localStorage.setItem('fujiya_device_sync_device_name_v1','GitHub-PC');
+      const remote=await window.deviceSyncPull(key);
+      const records=window.deviceSyncCaptureLocalRecords();
+      const pushed=await window.deviceSyncPush(key,Number(remote?.revision||0),records,{requestId:'gh-'+Date.now()});
+      return {key,revision:pushed?.revision||remote?.revision||0,count:records.length};
+    });
+    check('PC同期初期送信',!!syncSetup.key,'records='+syncSetup.count+' rev='+syncSetup.revision);
+
+    const mobileCtx=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true});
+    const mobile=await mobileCtx.newPage();
+    await boot(mobile,'スマホ');
+    await mobile.evaluate(({key})=>{
+      localStorage.setItem('fujiya_device_sync_secret_v1',key);
+      localStorage.setItem('fujiya_device_sync_device_name_v1','GitHub-スマホ');
+    },syncSetup);
+    await mobile.reload({waitUntil:'domcontentloaded',timeout:120000});
+    const mStart=Date.now();
+    let gotPc=false;
+    for(let i=0;i<90;i++){
+      if(await titleInSync(mobile,'スーパーマリオワールド')){gotPc=true;break;}
+      await sleep(2000);
+    }
+    out.timings.pc_to_mobile_ms=Date.now()-mStart;
+    check('PC→スマホ自動同期',gotPc,out.timings.pc_to_mobile_ms+'ms');
+    await safeShot(mobile,'03-mobile-after-pull');
+
+    await addGame(mobile,'SFC','クロノ・トリガー','4');
+    const pStart=Date.now();
+    let gotMobile=false;
+    for(let i=0;i<120;i++){
+      if(await titleInSync(desktop,'クロノ・トリガー')){gotMobile=true;break;}
+      await sleep(2000);
+    }
+    out.timings.mobile_to_pc_ms=Date.now()-pStart;
+    check('スマホ→PC自動同期',gotMobile,out.timings.mobile_to_pc_ms+'ms');
+
+    await tapTabs(mobile,'スマホ');
+    await safeShot(mobile,'04-mobile-tabs');
+
+    // UIのはみ出し・上被りの簡易監査
+    const layout=await mobile.evaluate(()=>{
+      const bad=[];
+      const vw=innerWidth,vh=innerHeight;
+      const selectors=['#mobileBottomNav','.mitemaga-reader-card','.public-profile-hub-card','.modal-backdrop > *','.image-modal-backdrop > *'];
+      for(const s of selectors){
+        document.querySelectorAll(s).forEach(el=>{
+          const st=getComputedStyle(el); if(st.display==='none'||st.visibility==='hidden') return;
+          const r=el.getBoundingClientRect();
+          if(r.left<-2||r.right>vw+2||r.top<-2||r.bottom>vh+2) bad.push({selector:s,rect:{x:r.x,y:r.y,w:r.width,h:r.height},vw,vh});
+        });
+      }
+      return bad;
+    });
+    check('スマホ固定UI画面外監査',layout.length===0,JSON.stringify(layout));
+
+    // 重大なconsole errorだけ抽出（favicon等は除外）
+    const severe=out.console.filter(x=>x.type==='error'&&!/favicon|ERR_BLOCKED_BY_CLIENT/i.test(x.text));
+    out.notes.push('console error count='+severe.length);
+    check('重大console error',severe.length===0,severe.slice(0,10).map(x=>x.text).join(' | '));
+
+    await desktopCtx.close(); await mobileCtx.close();
+  } catch(e){
+    check('E2E全体',false,String(e.stack||e));
+    console.error(e);
+  } finally {
+    out.finishedAt=new Date().toISOString();
+    fs.writeFileSync('artifacts/results.json',JSON.stringify(out,null,2));
+    console.log('RESULT_JSON '+JSON.stringify(out));
+    await browser.close();
+  }
+})();
