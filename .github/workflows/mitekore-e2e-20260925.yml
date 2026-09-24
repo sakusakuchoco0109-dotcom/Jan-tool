@@ -1,7 +1,5 @@
 name: Mitekore E2E 20260925
 on:
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 jobs:
   smoke:
