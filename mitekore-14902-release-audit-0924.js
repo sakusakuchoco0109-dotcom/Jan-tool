@@ -87,3 +87,4 @@ async function detailButton(page,id,action){await nav(page,'list');const b=page.
   fs.writeFileSync('mitekore-14902-release-audit-result.json',JSON.stringify(report,null,2));console.log('AUDIT_SUMMARY '+JSON.stringify(report.summary));await browser.close();
   if(report.summary.criticalFailed)process.exit(2);
 })().catch(async e=>{report.fatal=String(e&&e.stack||e);report.finishedAt=new Date().toISOString();fs.writeFileSync('mitekore-14902-release-audit-result.json',JSON.stringify(report,null,2));console.error('AUDIT_FATAL',e);process.exit(1)});
+// trigger 2026-09-24 release audit
