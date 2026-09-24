@@ -1,0 +1,22 @@
+name: Build Mitekore Static Title Index
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+jobs:
+  build-index:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Build static title index
+        run: node e2e/build-static-title-index.js
+      - name: Upload static index
+        uses: actions/upload-artifact@v4
+        with:
+          name: mitekore-title-index-14905
+          path: artifacts/
+          if-no-files-found: error
