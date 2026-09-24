@@ -36,29 +36,25 @@ async function boot(page,who){
   }
   check(who+' 起動',true,out.timings[who+'_dom_ms']+'ms');
 }
-async function goRegister(page){
-  await page.evaluate(()=>{
-    (document.querySelector('[data-mobile-tab="register"]')||document.querySelector('[data-ui-tab="register"]'))?.click();
-  });
-  await page.waitForTimeout(400);
-  const quick=page.locator('#quickRegisterModeBtn');
-  if(await quick.isVisible().catch(()=>false))await quick.click();
-}
-async function addGame(page,who,title){
-  await goRegister(page);
-  await page.locator('#platform').fill('SFC');
-  await page.locator('#title').fill(title);
-  const c=page.locator('#masterCandidates .candidate-item').filter({hasText:title}).first();
-  const ct=Date.now();
-  await c.waitFor({state:'visible',timeout:10000});
-  const cms=Date.now()-ct;
-  await c.click();
-  check(who+' 候補 '+title,true,cms+'ms');
-  const save=page.locator('#saveBtn');
-  await save.waitFor({state:'visible',timeout:10000});
-  const st=Date.now(); await save.click();
-  await page.waitForFunction(t=>Array.isArray(window.state?.entries)&&window.state.entries.some(e=>String(e.title||'').includes(t)),title,{timeout:30000});
-  check(who+' 登録 '+title,true,(Date.now()-st)+'ms');
+async function seedGame(page,who,title){
+  const result=await page.evaluate(t=>{
+    const now=new Date().toISOString();
+    const raw={
+      id:(typeof uid==='function'?uid():'gh-'+Date.now()+'-'+Math.random().toString(36).slice(2)),
+      platform:'SFC',title:t,canonicalTitle:t,titleKey:(typeof titleKey==='function'?titleKey(t):t),
+      owned:true,mediaType:'package',rating:0,playStatus:'',clearHours:'',
+      purchaseDate:'',purchasePrice:'',purchaseStore:'',releaseDate:'',maker:'',
+      parts:(typeof emptyParts==='function'?emptyParts():{}),memo:'',photoData:'',
+      createdAt:now,updatedAt:now,sharedTitleId:'',sharedStatus:'unconfirmed',localSharedId:''
+    };
+    const entry=(typeof norm==='function'?norm(raw):raw);
+    state.entries.unshift(entry);
+    const ok=save();
+    render();
+    try{scheduleAutoSync?.('GitHub同期テスト追加');}catch(_){}
+    return {ok,id:entry.id,count:state.entries.length};
+  },title);
+  check(who+' ローカル追加 '+title,!!result?.ok,'entries='+result?.count);
 }
 async function waitTitle(page,title,timeout=90000){
   const t=Date.now();
@@ -73,7 +69,7 @@ async function waitTitle(page,title,timeout=90000){
     const pcCtx=await browser.newContext({viewport:{width:1440,height:900}});
     const pc=await pcCtx.newPage();
     await boot(pc,'PC');
-    await addGame(pc,'PC','スーパーマリオワールド');
+    await seedGame(pc,'PC','スーパーマリオワールド');
 
     const setup=await pc.evaluate(async()=>{
       const key=window.deviceSyncGenerateKey();
@@ -102,7 +98,7 @@ async function waitTitle(page,title,timeout=90000){
     const pcToMobile=await waitTitle(mobile,'スーパーマリオワールド',90000);
     check('PC→スマホ自動同期',pcToMobile>=0,pcToMobile+'ms');
 
-    await addGame(mobile,'スマホ','クロノ・トリガー');
+    await seedGame(mobile,'スマホ','クロノ・トリガー');
     const mobileToPc=await waitTitle(pc,'クロノ・トリガー',90000);
     check('スマホ→PC自動同期',mobileToPc>=0,mobileToPc+'ms');
 
