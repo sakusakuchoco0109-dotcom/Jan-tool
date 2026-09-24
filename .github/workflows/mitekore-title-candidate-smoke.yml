@@ -1,0 +1,21 @@
+name: Mitekore Title Candidate Smoke
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+jobs:
+  title-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright@1.55.0
+          npx playwright install --with-deps chromium
+      - name: Check static title candidate speed
+        run: node e2e/mitekore-title-candidate-smoke.js
