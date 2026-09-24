@@ -62,8 +62,15 @@ async function addGame(page, platform, title, rating='4'){
   await page.locator('#platform').dispatchEvent('change').catch(()=>{});
   await page.locator('#title').fill(title);
   const candidate=page.locator('#masterCandidates .candidate-item').filter({hasText:title}).first();
-  await candidate.waitFor({state:'visible',timeout:30000});
-  await candidate.click();
+  let masterSelected=false;
+  try{
+    await candidate.waitFor({state:'visible',timeout:12000});
+    await candidate.click();
+    masterSelected=true;
+  }catch(e){
+    out.notes.push('タイトル候補未表示のため手入力登録へ継続: '+title);
+    check('タイトル候補 '+title,false,'12秒以内に候補が出ない');
+  }
   await page.locator('#rating').selectOption(rating).catch(()=>{});
   const save=page.locator('#saveBtn');
   await save.waitFor({state:'visible',timeout:10000});
@@ -71,7 +78,7 @@ async function addGame(page, platform, title, rating='4'){
   await save.click();
   await page.waitForTimeout(1800);
   const ok=await titleInSync(page,title);
-  check('登録 '+title,ok,(Date.now()-start)+'ms');
+  check('登録 '+title,ok,(Date.now()-start)+'ms / master='+masterSelected);
   return Date.now()-start;
 }
 
