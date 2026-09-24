@@ -52,10 +52,17 @@ async function boot(page, name){
   check(name+' 起動', true, 'DOM '+out.timings[name+'_dom_ms']+'ms');
 }
 
+async function goTab(page, tab){
+  await page.evaluate((t)=>{
+    const d=document.querySelector('[data-ui-tab="'+t+'"]');
+    const m=document.querySelector('[data-mobile-tab="'+t+'"]');
+    (m||d)?.click();
+  },tab);
+  await page.waitForTimeout(650);
+}
 async function addGame(page, platform, title, rating='4'){
   const start=Date.now();
-  await page.evaluate(()=>document.querySelector('[data-ui-tab="register"]')?.click());
-  await page.waitForTimeout(500);
+  await goTab(page,'register');
   const quick=page.locator('#quickRegisterModeBtn');
   if(await quick.isVisible().catch(()=>false)) await quick.click();
   await page.locator('#platform').fill(platform);
@@ -84,22 +91,23 @@ async function addGame(page, platform, title, rating='4'){
 
 async function basicInteractions(page, who){
   try{
-    await page.evaluate(()=>document.querySelector('[data-ui-tab="list"]')?.click());
-    await page.waitForTimeout(800);
+    await goTab(page,'list');
     const count=await page.locator('#cards .card').count().catch(()=>0);
     check(who+' 一覧表示',count>0,'cards='+count);
   }catch(e){ check(who+' 一覧表示',false,String(e)); }
 
   try{
-    await page.evaluate(()=>document.querySelector('[data-ui-tab="dex"]')?.click());
-    await page.waitForTimeout(1200);
+    await goTab(page,'dex');
+    await page.waitForTimeout(550);
     const text=(await page.locator('#dexPanel').innerText().catch(()=>'' )).slice(0,300);
     check(who+' 図鑑表示',!!text,text.replace(/\s+/g,' ').slice(0,140));
   }catch(e){ check(who+' 図鑑表示',false,String(e)); }
 
   try{
-    const searchBtn=page.locator('[data-global-search-open596]').first();
-    if(await searchBtn.isVisible().catch(()=>false)){
+    const searchButtons=page.locator('[data-global-search-open596]');
+    let searchBtn=null;
+    for(let i=0;i<await searchButtons.count();i++){ const b=searchButtons.nth(i); if(await b.isVisible().catch(()=>false)){searchBtn=b;break;} }
+    if(searchBtn){
       await searchBtn.click();
       await page.waitForTimeout(400);
       const input=page.locator('#globalSearchInput596');
@@ -117,8 +125,8 @@ async function tapTabs(page, who){
   const tabs=['list','dex','data','log','magazine','sync','manage'];
   for(const tab of tabs){
     try{
-      await page.evaluate(t=>document.querySelector('[data-ui-tab="'+t+'"],[data-desktop-tab="'+t+'"]')?.click(),tab);
-      await page.waitForTimeout(900);
+      await goTab(page,tab);
+      await page.waitForTimeout(250);
       check(who+' タブ '+tab,true);
     }catch(e){ check(who+' タブ '+tab,false,String(e)); }
   }
@@ -136,6 +144,8 @@ async function tapTabs(page, who){
 
     await basicInteractions(desktop,'PC');
     await tapTabs(desktop,'PC');
+    const lateMaster=await desktop.evaluate(()=>({count:Array.isArray(window.MASTER_TITLES)?window.MASTER_TITLES.length:null,indexReady:!!window.fujiyaMasterSearchIndexReady?.()}));
+    check('PC タイトルDB遅延後状態',Number(lateMaster.count||0)>1000,JSON.stringify(lateMaster));
     await safeShot(desktop,'02-pc-tabs');
 
     const syncSetup=await desktop.evaluate(async()=>{
