@@ -82,8 +82,39 @@ async function addGame(page, platform, title, rating='4'){
   return Date.now()-start;
 }
 
+async function basicInteractions(page, who){
+  try{
+    await page.evaluate(()=>document.querySelector('[data-ui-tab="list"]')?.click());
+    await page.waitForTimeout(800);
+    const count=await page.locator('#cards .card').count().catch(()=>0);
+    check(who+' 一覧表示',count>0,'cards='+count);
+  }catch(e){ check(who+' 一覧表示',false,String(e)); }
+
+  try{
+    await page.evaluate(()=>document.querySelector('[data-ui-tab="dex"]')?.click());
+    await page.waitForTimeout(1200);
+    const text=(await page.locator('#dexPanel').innerText().catch(()=>'' )).slice(0,300);
+    check(who+' 図鑑表示',!!text,text.replace(/\s+/g,' ').slice(0,140));
+  }catch(e){ check(who+' 図鑑表示',false,String(e)); }
+
+  try{
+    const searchBtn=page.locator('[data-global-search-open596]').first();
+    if(await searchBtn.isVisible().catch(()=>false)){
+      await searchBtn.click();
+      await page.waitForTimeout(400);
+      const input=page.locator('#globalSearchInput596');
+      if(await input.isVisible().catch(()=>false)){
+        await input.fill('マリオ');
+        await page.waitForTimeout(900);
+        const txt=(await page.locator('#globalSearchModal596').innerText().catch(()=>'' )).slice(0,600);
+        check(who+' 全体検索',/マリオ|検索結果|該当/.test(txt),txt.replace(/\s+/g,' ').slice(0,180));
+        await page.keyboard.press('Escape').catch(()=>{});
+      }
+    }
+  }catch(e){ check(who+' 全体検索',false,String(e)); }
+}
 async function tapTabs(page, who){
-  const tabs=['list','dex','data','sync','manage'];
+  const tabs=['list','dex','data','log','magazine','sync','manage'];
   for(const tab of tabs){
     try{
       await page.evaluate(t=>document.querySelector('[data-ui-tab="'+t+'"],[data-desktop-tab="'+t+'"]')?.click(),tab);
@@ -103,6 +134,7 @@ async function tapTabs(page, who){
     await addGame(desktop,'SFC','スーパーマリオワールド','5');
     await safeShot(desktop,'01-pc-after-register');
 
+    await basicInteractions(desktop,'PC');
     await tapTabs(desktop,'PC');
     await safeShot(desktop,'02-pc-tabs');
 
@@ -145,6 +177,7 @@ async function tapTabs(page, who){
     out.timings.mobile_to_pc_ms=Date.now()-pStart;
     check('スマホ→PC自動同期',gotMobile,out.timings.mobile_to_pc_ms+'ms');
 
+    await basicInteractions(mobile,'スマホ');
     await tapTabs(mobile,'スマホ');
     await safeShot(mobile,'04-mobile-tabs');
 
