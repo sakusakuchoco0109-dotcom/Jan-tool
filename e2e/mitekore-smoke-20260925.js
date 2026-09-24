@@ -1,4 +1,4 @@
-// rerun: 2026-09-25 GAS3.13.38 + updated netlify
+// rerun: 2026-09-25 static title index deployed
 const { chromium } = require('playwright');
 const fs = require('fs');
 
