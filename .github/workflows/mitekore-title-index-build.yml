@@ -1,7 +1,5 @@
 name: Build Mitekore Static Title Index
 on:
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 jobs:
   build-index:
