@@ -10,6 +10,16 @@ const titleInSync=async(page,title)=>page.evaluate((t)=>{
   try { return JSON.stringify(window.deviceSyncCaptureLocalRecords?.()||[]).includes(t); } catch(e){ return false; }
 }, title);
 
+async function ensureNormalAccess(page){
+  const gate=page.locator('#fujiyaEarlyAccessGateV1');
+  if(await gate.isVisible().catch(()=>false)){
+    const normal=page.locator('#fujiyaEarlyAccessNormalStart14728');
+    if(await normal.isVisible().catch(()=>false)){
+      await normal.click();
+      await page.waitForTimeout(500);
+    }
+  }
+}
 async function acceptLegal(page){
   const gate=page.locator('#fujiyaLegalGate14750');
   if(await gate.isVisible().catch(()=>false)){
@@ -25,8 +35,7 @@ async function boot(page, name){
   await page.goto(BASE,{waitUntil:'domcontentloaded',timeout:120000});
   out.timings[name+'_dom_ms']=Date.now()-t0;
   await page.waitForTimeout(2500);
-  const normal=page.locator('#fujiyaEarlyAccessNormalStart14728');
-  if(await normal.isVisible().catch(()=>false)){ await normal.click(); await page.waitForTimeout(700); }
+  await ensureNormalAccess(page);
   await acceptLegal(page);
   const newBtn=page.locator('#firstRunNewBtn');
   if(await newBtn.isVisible().catch(()=>false)){
@@ -144,7 +153,11 @@ async function tapTabs(page, who){
 
     await basicInteractions(desktop,'PC');
     await tapTabs(desktop,'PC');
-    const lateMaster=await desktop.evaluate(()=>({count:Array.isArray(window.MASTER_TITLES)?window.MASTER_TITLES.length:null,indexReady:!!window.fujiyaMasterSearchIndexReady?.()}));
+    const lateMaster=await desktop.evaluate(()=>({
+      count:(typeof MASTER_TITLES!=='undefined'&&Array.isArray(MASTER_TITLES))?MASTER_TITLES.length:null,
+      indexReady:!!window.fujiyaMasterSearchIndexReady?.(),
+      mario:(typeof findMasterCandidates==='function')?findMasterCandidates('スーパーマリオワールド').slice(0,5).map(x=>({title:x.canonicalTitle,platform:x.platform,id:x.sharedTitleId})):[]
+    }));
     check('PC タイトルDB遅延後状態',Number(lateMaster.count||0)>1000,JSON.stringify(lateMaster));
     await safeShot(desktop,'02-pc-tabs');
 
@@ -167,6 +180,9 @@ async function tapTabs(page, who){
       localStorage.setItem('fujiya_device_sync_device_name_v1','GitHub-スマホ');
     },syncSetup);
     await mobile.reload({waitUntil:'domcontentloaded',timeout:120000});
+    await mobile.waitForTimeout(1200);
+    await ensureNormalAccess(mobile);
+    await acceptLegal(mobile);
     const mStart=Date.now();
     let gotPc=false;
     for(let i=0;i<90;i++){
