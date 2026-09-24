@@ -1,4 +1,4 @@
-// rerun: 2026-09-25 updated netlify
+// rerun: 2026-09-25 GAS3.13.38 + updated netlify
 const { chromium } = require('playwright');
 const fs = require('fs');
 
